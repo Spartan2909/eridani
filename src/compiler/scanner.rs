@@ -74,7 +74,11 @@ pub struct Token {
 
 impl Token {
     fn new(kind: TokenType, lexeme: &str, line: usize) -> Self {
-        Token { kind, lexeme: lexeme.to_string(), line }
+        Token {
+            kind,
+            lexeme: lexeme.to_string(),
+            line,
+        }
     }
 
     pub fn kind(&self) -> TokenType {
@@ -198,7 +202,7 @@ impl Scanner {
                 'n' => TokenType::In,
                 's' => TokenType::Is,
                 _ => TokenType::Identifier,
-            }
+            },
             'l' => self.check_keyword(1, "et", TokenType::Let),
             'm' => self.check_keyword(1, "ethod", TokenType::Method),
             'n' => self.check_keyword(1, "othing", TokenType::Nothing),
@@ -228,7 +232,12 @@ impl Scanner {
         }
 
         if self.is_at_end() {
-            Err(Error::new(self.line, "Syntax", " at '\"'", "Unterminated string"))
+            Err(Error::new(
+                self.line,
+                "Syntax",
+                " at '\"'",
+                "Unterminated string",
+            ))
         } else {
             self.advance();
             Ok(self.make_token(TokenType::String))

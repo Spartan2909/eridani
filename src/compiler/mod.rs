@@ -8,8 +8,8 @@ use std::error;
 
 use crate::prelude::*;
 
-mod scanner;
 mod parser;
+mod scanner;
 
 #[derive(Debug, Clone)]
 pub enum Error {
@@ -28,12 +28,13 @@ impl fmt::Display for Error {
             Self::Collection(errors) => {
                 write!(f, "{:#?}", errors)
             }
-            Self::Single { line, kind, location, message } => {
-                write!(
-                    f,
-                    "[line {}] {} Error{}: {}",
-                    line, kind, location, message
-                )
+            Self::Single {
+                line,
+                kind,
+                location,
+                message,
+            } => {
+                write!(f, "[line {}] {} Error{}: {}", line, kind, location, message)
             }
         }
     }
@@ -49,7 +50,12 @@ impl error::Error for Error {}
 
 impl Error {
     fn new(line: usize, kind: &'static str, location: &str, message: &'static str) -> Self {
-        Error::Single { line, kind, location: location.to_string(), message }
+        Error::Single {
+            line,
+            kind,
+            location: location.to_string(),
+            message,
+        }
     }
 }
 

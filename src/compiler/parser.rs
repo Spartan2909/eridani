@@ -1,4 +1,7 @@
-use super::{Error, Result, scanner::{OptionalKind, Token, TokenType}};
+use super::{
+    scanner::{OptionalKind, Token, TokenType},
+    Error, Result,
+};
 
 #[derive(Debug, Clone)]
 pub struct Program {
@@ -260,7 +263,7 @@ impl Parser {
             for _ in 0..=offset {
                 self.advance();
             }
-            
+
             true
         } else {
             false
@@ -291,20 +294,44 @@ impl Parser {
         }
     }
 
+    fn synchronise(&mut self) {
+        self.advance();
+        while !self.is_at_end() {
+            if self.peek(1).optional_kind() == Some(TokenType::Is)
+                || self.peek(0).optional_kind() == Some(TokenType::Use)
+            {
+                return;
+            }
+
+            self.advance();
+        }
+    }
+
     fn parse(&mut self) -> Result<Program> {
         let mut imports = vec![];
         let mut functions = vec![];
+        let mut errors = vec![];
 
         while !self.is_at_end() {
-            if self.match_token(TokenType::Use, true) {
-                imports.push(self.import("Expect function or module name after 'use'")?);
-            } else {
-                functions.push(self.function()?);
+            let result: Result<()> = try {
+                if self.match_token(TokenType::Use, true) {
+                    imports.push(self.import("Expect function or module name after 'use'")?);
+                } else {
+                    functions.push(self.function()?);
+                }
+            };
+
+            if let Err(err) = result {
+                errors.push(err);
+                self.synchronise();
             }
         }
-        dbg!(&imports, &functions);
 
-        Ok(Program { imports, functions })
+        if errors.is_empty() {
+            Ok(Program { imports, functions })
+        } else {
+            Err(Error::Collection(errors))
+        }
     }
 
     fn import(&mut self, message: &'static str) -> Result<ImportTree> {
@@ -327,7 +354,10 @@ impl Parser {
         while self.match_token(TokenType::LeftParen, true) {
             methods.push(dbg!(self.method())?);
             dbg!(&self.tokens[self.current..]);
-            self.consume_any(vec![TokenType::Newline, TokenType::Eof], "Expect newline after method")?;
+            self.consume_any(
+                vec![TokenType::Newline, TokenType::Eof],
+                "Expect newline after method",
+            )?;
         }
 
         Ok(Function { name, methods })
@@ -345,7 +375,10 @@ impl Parser {
                 } else {
                     None
                 };
-                args.push(NamedPattern { name, pattern: self.pattern()? });
+                args.push(NamedPattern {
+                    name,
+                    pattern: self.pattern()?,
+                });
 
                 if !self.match_token(TokenType::Comma, true) {
                     break;
@@ -369,7 +402,11 @@ impl Parser {
         while self.match_token(TokenType::Pipe, true) {
             let operator = self.previous().clone();
             let right = Box::new(self.and()?);
-            pattern = Pattern::Binary { left: Box::new(pattern), operator, right }
+            pattern = Pattern::Binary {
+                left: Box::new(pattern),
+                operator,
+                right,
+            }
         }
 
         Ok(pattern)
@@ -381,7 +418,11 @@ impl Parser {
         while self.match_token(TokenType::Ampersand, true) {
             let operator = self.previous().clone();
             let right = Box::new(self.comparison()?);
-            pattern = Pattern::Binary { left: Box::new(pattern), operator, right }
+            pattern = Pattern::Binary {
+                left: Box::new(pattern),
+                operator,
+                right,
+            }
         }
 
         Ok(pattern)
@@ -399,7 +440,10 @@ impl Parser {
             TokenType::LessEqual
         ) {
             let comparison = self.previous().clone();
-            let rhs = self.consume_any(vec![TokenType::Number, TokenType::String], "Expect literal after comparison")?;
+            let rhs = self.consume_any(
+                vec![TokenType::Number, TokenType::String],
+                "Expect literal after comparison",
+            )?;
 
             Ok(Pattern::Comparision { comparison, rhs })
         } else {
@@ -408,7 +452,9 @@ impl Parser {
     }
 
     fn range(&mut self) -> Result<Pattern> {
-        if check_next!(self, TokenType::DotDot, TokenType::DotDotEqual) && self.match_token(TokenType::Number, true) {
+        if check_next!(self, TokenType::DotDot, TokenType::DotDotEqual)
+            && self.match_token(TokenType::Number, true)
+        {
             let lower = self.previous().clone();
             let inclusive = if self.match_token(TokenType::DotDot, false) {
                 false
@@ -417,7 +463,11 @@ impl Parser {
             };
             let upper = self.consume(TokenType::Number, "Expect number after range operator")?;
 
-            Ok(Pattern::Range { lower, upper, inclusive })
+            Ok(Pattern::Range {
+                lower,
+                upper,
+                inclusive,
+            })
         } else {
             self.pattern_grouping()
         }
@@ -436,7 +486,10 @@ impl Parser {
     fn pattern_list(&mut self) -> Result<Pattern> {
         if self.match_token(TokenType::LeftBracket, true) {
             let left = Box::new(self.pattern()?);
-            self.consume(TokenType::Comma, "Expect ',' after first element of list pattern")?;
+            self.consume(
+                TokenType::Comma,
+                "Expect ',' after first element of list pattern",
+            )?;
             let right = Box::new(self.pattern()?);
             self.consume(TokenType::RightBracket, "Expect ']' after list pattern")?;
 
@@ -459,13 +512,18 @@ impl Parser {
     fn pattern_primary(&mut self) -> Result<Pattern> {
         if match_token!(self, true, TokenType::Number, TokenType::String) {
             Ok(Pattern::Literal(self.previous().clone()))
-        } else if self.match_token(TokenType::Identifier, true) || self.match_token(TokenType::Underscore, true) {
+        } else if self.match_token(TokenType::Identifier, true)
+            || self.match_token(TokenType::Underscore, true)
+        {
             let token = self.previous().clone();
             Ok(Pattern::Wildcard(token))
         } else if self.match_token(TokenType::Type, true) {
             Ok(Pattern::Type(self.previous().clone()))
         } else {
-            Err(error(self.peek(0).unwrap(), "Expect literal, identifier, or '_'"))
+            Err(error(
+                self.peek(0).unwrap(),
+                "Expect literal, identifier, or '_'",
+            ))
         }
     }
 
@@ -476,7 +534,10 @@ impl Parser {
     fn assign(&mut self) -> Result<Expr> {
         if self.match_token(TokenType::Let, true) {
             let pattern = self.pattern()?;
-            self.consume(TokenType::Equal, "Expect '=' after pattern in let expression")?;
+            self.consume(
+                TokenType::Equal,
+                "Expect '=' after pattern in let expression",
+            )?;
             let value = Box::new(self.expression()?);
             Ok(Expr::Let { pattern, value })
         } else {
@@ -490,7 +551,11 @@ impl Parser {
         while match_token!(self, true, TokenType::Plus, TokenType::Minus) {
             let operator = self.previous().clone();
             let right = Box::new(self.factor()?);
-            expr = Expr::Binary { left: Box::new(expr), operator, right };
+            expr = Expr::Binary {
+                left: Box::new(expr),
+                operator,
+                right,
+            };
         }
 
         Ok(expr)
@@ -499,10 +564,20 @@ impl Parser {
     fn factor(&mut self) -> Result<Expr> {
         let mut expr = self.unary()?;
 
-        while match_token!(self, true, TokenType::Star, TokenType::Slash, TokenType::Mod) {
+        while match_token!(
+            self,
+            true,
+            TokenType::Star,
+            TokenType::Slash,
+            TokenType::Mod
+        ) {
             let operator = self.previous().clone();
             let right = Box::new(self.unary()?);
-            expr = Expr::Binary { left: Box::new(expr), operator, right };
+            expr = Expr::Binary {
+                left: Box::new(expr),
+                operator,
+                right,
+            };
         }
 
         Ok(expr)
@@ -578,11 +653,21 @@ impl Parser {
 
         let paren = self.consume(TokenType::RightParen, "Expect ')' after arguments")?;
 
-        Ok(Expr::Call { callee: Box::new(callee), paren, arguments })
+        Ok(Expr::Call {
+            callee: Box::new(callee),
+            paren,
+            arguments,
+        })
     }
 
     fn primary(&mut self) -> Result<Expr> {
-        if match_token!(self, true, TokenType::Nothing, TokenType::Number, TokenType::String) {
+        if match_token!(
+            self,
+            true,
+            TokenType::Nothing,
+            TokenType::Number,
+            TokenType::String
+        ) {
             Ok(Expr::Literal(self.previous().clone()))
         } else if self.match_token(TokenType::LeftParen, true) {
             let expr = self.expression()?;

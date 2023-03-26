@@ -22,8 +22,8 @@ struct Args {
 fn main() {
     let args = Args::parse();
 
-    let contents = fs::read_to_string(args.file_path)
-        .expect("Should have been able to read the file");
+    let contents =
+        fs::read_to_string(args.file_path).expect("Should have been able to read the file");
 
     dbg!(eridani::compiler::parse(&contents));
 }
