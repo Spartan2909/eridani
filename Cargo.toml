@@ -1,0 +1,24 @@
+[package]
+name = "eridani"
+version = "0.1.0"
+edition = "2021"
+default-run = "eri"
+
+[dependencies]
+clap = { version = "4.1", features = ["derive"], optional = true }
+
+[features]
+default = ["compiler", "runtime"]
+compiler = []
+runtime = []
+web = ["runtime"]
+no_std = []
+tree_walk = ["compiler", "runtime"]
+bin = ["dep:clap", "tree_walk"]   # REMOVE DEPENDENCY ON TREE_WALK ONCE BYTECODE VM IS FINISHED
+
+[lib]
+crate_type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "eri"
+required-features = ["bin"]
