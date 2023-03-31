@@ -8,6 +8,7 @@ use std::error;
 
 use crate::prelude::*;
 
+mod analyser;
 mod parser;
 mod scanner;
 
@@ -62,11 +63,11 @@ impl Error {
 type Result<T> = result::Result<T, Error>;
 
 #[cfg(feature = "tree_walk")]
-pub use parser::Program;
+pub use parser::ParseTree;
 
 #[cfg(feature = "tree_walk")]
-pub fn parse(source: &str) -> Result<Program> {
-    let tokens = dbg!(scanner::scan(source)?);
+pub fn parse(source: &str) -> Result<ParseTree> {
+    let tokens = scanner::scan(source)?;
     parser::parse(tokens)
 }
 

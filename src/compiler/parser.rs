@@ -4,7 +4,7 @@ use super::{
 };
 
 #[derive(Debug, Clone)]
-pub struct Program {
+pub struct ParseTree {
     imports: Vec<ImportTree>,
     functions: Vec<Function>,
 }
@@ -98,33 +98,33 @@ impl Pattern {
 #[derive(Debug, Clone)]
 pub enum Expr {
     Binary {
-        left: Box<Expr>,
+        left: Box<Self>,
         operator: Token,
-        right: Box<Expr>,
+        right: Box<Self>,
     },
     Block {
-        body: Vec<Expr>,
+        body: Vec<Self>,
         end: Token,
     },
     Call {
-        callee: Box<Expr>,
+        callee: Box<Self>,
         paren: Token,
-        arguments: Vec<Expr>,
+        arguments: Vec<Self>,
     },
-    Grouping(Box<Expr>),
+    Grouping(Box<Self>),
     Let {
         pattern: Pattern,
-        value: Box<Expr>,
+        value: Box<Self>,
     },
     List {
-        expressions: Vec<Expr>,
+        expressions: Vec<Self>,
         end: Token,
     },
     Literal(Token),
     Method(Box<Method>),
     Unary {
         operator: Token,
-        right: Box<Expr>,
+        right: Box<Self>,
     },
     Variable(ImportTree),
 }
@@ -307,7 +307,7 @@ impl Parser {
         }
     }
 
-    fn parse(&mut self) -> Result<Program> {
+    fn parse(&mut self) -> Result<ParseTree> {
         let mut imports = vec![];
         let mut functions = vec![];
         let mut errors = vec![];
@@ -328,7 +328,7 @@ impl Parser {
         }
 
         if errors.is_empty() {
-            Ok(Program { imports, functions })
+            Ok(ParseTree { imports, functions })
         } else {
             Err(Error::Collection(errors))
         }
@@ -352,8 +352,7 @@ impl Parser {
         let mut methods = vec![];
 
         while self.match_token(TokenType::LeftParen, true) {
-            methods.push(dbg!(self.method())?);
-            dbg!(&self.tokens[self.current..]);
+            methods.push(self.method()?);
             self.consume_any(
                 vec![TokenType::Newline, TokenType::Eof],
                 "Expect newline after method",
@@ -680,7 +679,6 @@ impl Parser {
                 body.push(self.expression()?);
                 self.skip_newlines();
             }
-            dbg!(&body);
             let end = self.consume(TokenType::End, "Expect 'end' after block")?;
             Ok(Expr::Block { body, end })
         } else if self.check_token(TokenType::Identifier, 0) {
@@ -692,6 +690,6 @@ impl Parser {
     }
 }
 
-pub fn parse(tokens: Vec<Token>) -> Result<Program> {
+pub fn parse(tokens: Vec<Token>) -> Result<ParseTree> {
     Parser::new(tokens).parse()
 }
