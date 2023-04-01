@@ -79,7 +79,7 @@ impl TryFrom<parser::Expr> for Expr {
                     TokenType::Slash => BinOp::Div,
                     TokenType::Mod => BinOp::Mod,
                     _ => panic!(
-                        "internal compiler error: parser token '{:?}' as operator",
+                        "internal compiler error: parsed token '{:?}' as operator",
                         operator
                     ),
                 };
