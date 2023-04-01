@@ -1,6 +1,13 @@
-use super::{parser, scanner::TokenType, Error, Result};
-
-use crate::common::value::Value;
+use crate::{
+    common::value::{Pattern, Value},
+    compiler::{
+        internal_error,
+        parser::{self, ParseTree},
+        scanner::TokenType,
+        Error, Result,
+    },
+    prelude::*,
+};
 
 #[derive(Debug, Clone)]
 pub struct Ast {}
@@ -19,11 +26,8 @@ pub enum UnOp {
     Negate,
 }
 
-fn vec_convert(value: Vec<parser::Expr>) -> Result<Vec<Expr>> {
-    value
-        .into_iter()
-        .map(|x| x.try_into())
-        .collect::<Result<Vec<Self>>>()
+fn vec_convert(value: Vec<parser::Expr>) -> Vec<Expr> {
+    value.into_iter().map(|x| x.into()).collect::<Vec<Expr>>()
 }
 
 #[derive(Debug, Clone)]
@@ -35,7 +39,7 @@ pub enum Expr {
     },
     Block {
         body: Vec<Self>,
-        end: Token,
+        line: usize,
     },
     Call {
         callee: Box<Self>,
@@ -52,18 +56,16 @@ pub enum Expr {
         line: usize,
     },
     Literal(Value),
-    Method(Box<Method>),
+    //Method(Box<Method>),
     Unary {
         operator: UnOp,
         right: Box<Self>,
     },
-    Variable(ImportTree),
+    //Variable(ImportTree),
 }
 
-impl TryFrom<parser::Expr> for Expr {
-    type Error = Error;
-
-    fn try_from(value: parser::Expr) -> Result<Self> {
+impl From<parser::Expr> for Expr {
+    fn from(value: parser::Expr) -> Self {
         use parser::Expr as ParseExpr;
 
         match value {
@@ -78,45 +80,64 @@ impl TryFrom<parser::Expr> for Expr {
                     TokenType::Star => BinOp::Mul,
                     TokenType::Slash => BinOp::Div,
                     TokenType::Mod => BinOp::Mod,
-                    _ => panic!(
-                        "internal compiler error: parsed token '{:?}' as operator",
+                    _ => internal_error!(
+                        "parsed token '{:?}' as operator",
                         operator
                     ),
                 };
 
-                Ok(Self::Binary {
-                    left: Box::new((&*left).try_into()?),
+                Self::Binary {
+                    left: Box::new((&*left).into()),
                     operator,
-                    right: Box::new((&*right).try_into()?),
-                })
+                    right: Box::new((&*right).into()),
+                }
             }
-            ParseExpr::Block { body, end } => Ok(Self::Block {
-                body: vec_convert(body)?,
-                end: end.line(),
-            }),
+            ParseExpr::Block { body, end } => Self::Block {
+                body: vec_convert(body),
+                line: end.line(),
+            },
             ParseExpr::Call {
                 callee,
                 paren,
                 arguments,
-            } => Ok(Self::Call {
-                callee: Box::new((&*callee).try_into()?),
-                arguments: vec_convert(arguments)?,
+            } => Self::Call {
+                callee: Box::new((&*callee).into()),
+                arguments: vec_convert(arguments),
                 line: paren.line(),
-            }),
-            ParseExpr::Grouping(expr) => Ok(Self::Grouping(Box::new((&*expr).try_into()?))),
+            },
+            ParseExpr::Grouping(expr) => Self::Grouping(Box::new((&*expr).into())),
             ParseExpr::Let { pattern, value } => todo!(),
-            ParseExpr::List { expressions, end } => Ok(Self::List {
-                expressions: vec_convert(expressions)?,
+            ParseExpr::List { expressions, end } => Self::List {
+                expressions: vec_convert(expressions),
                 line: end.line(),
-            }),
+            },
+            ParseExpr::Literal(token) => Self::Literal(token.into()),
+            ParseExpr::Method(method) => todo!(),
+            ParseExpr::Unary { operator, right } => {
+                let operator = match operator.kind() {
+                    TokenType::Minus => UnOp::Negate,
+                    _ => internal_error!(
+                        "parsed token {:?} as unary",
+                        operator
+                    ),
+                };
+
+                Self::Unary {
+                    operator,
+                    right: Box::new((&*right).into()),
+                }
+            }
+            ParseExpr::Variable(var) => todo!(),
         }
     }
 }
 
-impl TryFrom<&parser::Expr> for Expr {
-    type Error = Error;
-
-    fn try_from(value: &parser::Expr) -> core::result::Result<Self, Self::Error> {
-        value.clone().try_into()
+impl From<&parser::Expr> for Expr {
+    fn from(value: &parser::Expr) -> Self {
+        value.clone().into()
     }
+}
+
+pub fn analyse(_parse_tree: ParseTree) -> Result<Ast> {
+    todo!()
 }

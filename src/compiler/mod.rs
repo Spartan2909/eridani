@@ -8,9 +8,17 @@ use std::error;
 
 use crate::prelude::*;
 
-mod analyser;
-mod parser;
-mod scanner;
+pub(crate) mod analyser;
+pub(crate) mod parser;
+pub(crate) mod scanner;
+
+macro_rules! internal_error {
+    ( $str:expr, $( $arg:expr )* ) => {
+        panic!(concat!("internal compiler error: ", $str), $( $arg )*)
+    };
+}
+
+pub(crate) use internal_error;
 
 #[derive(Debug, Clone)]
 pub enum Error {
