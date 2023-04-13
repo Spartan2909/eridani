@@ -1,11 +1,9 @@
 use super::*;
 
-use crate::
-    compiler::{
-        internal_error, parser,
-        scanner::{Token, TokenType},
-    }
-;
+use crate::compiler::{
+    internal_error, parser,
+    scanner::{Token, TokenType},
+};
 
 #[cfg(feature = "no_std")]
 use crate::prelude::*;
