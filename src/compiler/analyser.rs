@@ -1,10 +1,10 @@
 use crate::{
-    common::value::{Pattern, Value},
+    common::{Pattern, Value},
     compiler::{
         internal_error,
         parser::{self, ParseTree},
         scanner::TokenType,
-        Error, Result,
+        Result,
     },
     prelude::*,
 };
@@ -80,10 +80,7 @@ impl From<parser::Expr> for Expr {
                     TokenType::Star => BinOp::Mul,
                     TokenType::Slash => BinOp::Div,
                     TokenType::Mod => BinOp::Mod,
-                    _ => internal_error!(
-                        "parsed token '{:?}' as operator",
-                        operator
-                    ),
+                    _ => internal_error!("parsed token '{:?}' as operator", operator),
                 };
 
                 Self::Binary {
@@ -116,10 +113,7 @@ impl From<parser::Expr> for Expr {
             ParseExpr::Unary { operator, right } => {
                 let operator = match operator.kind() {
                     TokenType::Minus => UnOp::Negate,
-                    _ => internal_error!(
-                        "parsed token {:?} as unary",
-                        operator
-                    ),
+                    _ => internal_error!("parsed token {:?} as unary", operator),
                 };
 
                 Self::Unary {
