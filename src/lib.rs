@@ -7,6 +7,8 @@ compile_error!("Either feature 'compiler' or feature 'runtime' must be enabled."
 mod prelude {
     extern crate alloc;
     pub use alloc::{
+        boxed::Box,
+        format,
         string::{String, ToString},
         vec,
         vec::Vec,

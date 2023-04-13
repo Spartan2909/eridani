@@ -1,6 +1,9 @@
-use crate::compiler::{
-    scanner::{OptionalKind, Token, TokenType},
-    Error, Result,
+use crate::{
+    compiler::{
+        scanner::{OptionalKind, Token, TokenType},
+        Error, Result,
+    },
+    prelude::*,
 };
 
 #[derive(Debug, Clone)]
