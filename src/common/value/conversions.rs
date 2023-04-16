@@ -3,7 +3,6 @@ use super::*;
 use crate::compiler::{
     internal_error, parser,
     scanner::{Token, TokenType},
-    Error,
 };
 
 #[cfg(feature = "no_std")]
