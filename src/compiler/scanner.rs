@@ -106,7 +106,7 @@ impl OptionalKind for Option<Token> {
 
 impl OptionalKind for Option<&Token> {
     fn optional_kind(&self) -> Option<TokenType> {
-        Some(self.clone()?.kind)
+        Some((*self)?.kind)
     }
 }
 

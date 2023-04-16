@@ -56,11 +56,7 @@ pub struct NamedPattern {
 
 impl NamedPattern {
     pub fn name(&self) -> Option<String> {
-        if let Some(name) = &self.name {
-            Some(name.lexeme().to_string())
-        } else {
-            None
-        }
+        self.name.as_ref().map(|name| name.lexeme().to_string())
     }
 
     pub fn pattern(&self) -> &Pattern {
@@ -237,7 +233,7 @@ impl Parser {
     }
 
     fn peek(&self, offset: usize) -> Option<&Token> {
-        self.tokens.iter().nth(self.current + offset)
+        self.tokens.get(self.current + offset)
     }
 
     fn previous(&self) -> &Token {
@@ -472,11 +468,7 @@ impl Parser {
             && self.match_token(TokenType::Number, true)
         {
             let lower = self.previous().clone();
-            let inclusive = if self.match_token(TokenType::DotDot, false) {
-                false
-            } else {
-                true
-            };
+            let inclusive = !self.match_token(TokenType::DotDot, false);
             let upper = self.consume(TokenType::Number, "Expect number after range operator")?;
 
             Ok(Pattern::Range {

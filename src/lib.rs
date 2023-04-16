@@ -1,4 +1,4 @@
-#![feature(try_blocks, negative_impls)]
+#![feature(try_blocks)]
 #![cfg_attr(feature = "no_std", no_std, feature(core_intrinsics, error_in_core))]
 
 #[cfg(not(any(feature = "compiler", feature = "runtime")))]

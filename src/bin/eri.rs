@@ -1,7 +1,5 @@
 use std::fs;
 
-use eridani;
-
 use clap::Parser;
 
 #[derive(Parser)]
