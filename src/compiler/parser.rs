@@ -80,6 +80,12 @@ pub enum Pattern {
         right: Box<Pattern>,
     },
     Literal(Token),
+    OperatorComparison {
+        operator: Token,
+        mid: Token,
+        comparison: Token,
+        rhs: Token,
+    },
     Range {
         lower: Token,
         upper: Token,
@@ -100,6 +106,7 @@ impl Pattern {
             Pattern::Comparision { rhs, .. } => rhs.line(),
             Pattern::List { right, .. } => right.line(),
             Pattern::Literal(token) => token.line(),
+            Pattern::OperatorComparison { rhs, .. } => rhs.line(),
             Pattern::Range { upper, .. } => upper.line(),
             Pattern::Type(token) => token.line(),
             Pattern::Unary { right, .. } => right.line(),
@@ -425,7 +432,7 @@ impl Parser {
     }
 
     fn and(&mut self) -> Result<Pattern> {
-        let mut pattern = self.comparison()?;
+        let mut pattern = self.operator_comparison()?;
 
         while self.match_token(TokenType::Ampersand, true) {
             let operator = self.previous().clone();
@@ -438,6 +445,30 @@ impl Parser {
         }
 
         Ok(pattern)
+    }
+
+    fn operator_comparison(&mut self) -> Result<Pattern> {
+        if match_token!(self, true, TokenType::Plus, TokenType::Minus, TokenType::Star, TokenType::Slash, TokenType::Mod) {
+            let operator = self.previous().clone();
+            let mid = self.consume_any(
+                vec![TokenType::Number, TokenType::String],
+                "Expect literal after operator",
+            )?;
+            let comparison = self.consume_any(vec![TokenType::BangEqual,
+                TokenType::EqualEqual,
+                TokenType::Greater,
+                TokenType::GreaterEqual,
+                TokenType::Less,
+                TokenType::LessEqual], "Expect comparison")?;
+            let rhs = self.consume_any(
+                vec![TokenType::Number, TokenType::String],
+                "Expect literal after comparison",
+            )?;
+
+            Ok(Pattern::OperatorComparison { operator, mid, comparison, rhs })
+        } else {
+            self.comparison()
+        }
     }
 
     fn comparison(&mut self) -> Result<Pattern> {

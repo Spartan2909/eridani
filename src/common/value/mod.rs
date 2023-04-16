@@ -1,6 +1,6 @@
 use crate::prelude::*;
 
-use core::cmp::Ordering;
+use core::{cmp::Ordering, ops::{Add, Sub, Mul, Div, Rem}};
 
 #[derive(Debug, Clone)]
 pub enum Value {
@@ -8,6 +8,62 @@ pub enum Value {
     Nothing,
     Number(f64),
     String(String),
+}
+
+impl Add for Value {
+    type Output = Option<Value>;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        match (self, rhs) {
+            (Value::Number(n1), Value::Number(n2)) => Some(Value::Number(n1 + n2)),
+            (Value::String(s1), Value::String(s2)) => Some(Value::String(s1 + &s2)),
+            _ => None,
+        }
+    }
+}
+
+impl Sub for Value {
+    type Output = Option<Value>;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        match (self, rhs) {
+            (Value::Number(n1), Value::Number(n2)) => Some(Value::Number(n1 - n2)),
+            _ => None,
+        }
+    }
+}
+
+impl Mul for Value {
+    type Output = Option<Value>;
+
+    fn mul(self, rhs: Self) -> Self::Output {
+        match (self, rhs) {
+            (Value::Number(n1), Value::Number(n2)) => Some(Value::Number(n1 * n2)),
+            _ => None,
+        }
+    }
+}
+
+impl Div for Value {
+    type Output = Option<Value>;
+
+    fn div(self, rhs: Self) -> Self::Output {
+        match (self, rhs) {
+            (Value::Number(n1), Value::Number(n2)) => Some(Value::Number(n1 / n2)),
+            _ => None,
+        }
+    }
+}
+
+impl Rem for Value {
+    type Output = Option<Value>;
+
+    fn rem(self, rhs: Self) -> Self::Output {
+        match (self, rhs) {
+            (Value::Number(n1), Value::Number(n2)) => Some(Value::Number(n1 % n2)),
+            _ => None,
+        }
+    }
 }
 
 impl PartialEq for Value {
@@ -94,10 +150,32 @@ pub enum Comparision {
     LessEqual,
 }
 
+impl Comparision {
+    fn compare(self, lhs: &Value, rhs: &Value) -> bool {
+        match self {
+            Comparision::Equal => lhs == rhs,
+            Comparision::Greater => lhs > rhs,
+            Comparision::GreaterEqual => lhs >= rhs,
+            Comparision::Less => lhs < rhs,
+            Comparision::LessEqual => lhs <= rhs,
+            Comparision::NotEqual => lhs != rhs,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BinOp {
+pub enum LogOp {
     And,
     Or,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ArithOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -109,7 +187,7 @@ pub enum UnOp {
 pub enum Pattern {
     Binary {
         left: Box<Pattern>,
-        operator: BinOp,
+        operator: LogOp,
         right: Box<Pattern>,
     },
     Comparision {
@@ -121,6 +199,12 @@ pub enum Pattern {
         right: Box<Pattern>,
     },
     Literal(Value),
+    OperatorComparison {
+        operator: ArithOp,
+        mid: Value,
+        comparison: Comparision,
+        rhs: Value,
+    },
     Range {
         lower: Value,
         upper: Value,
@@ -148,7 +232,7 @@ impl Pattern {
             } => {
                 let mut new_bindings = left.matches(value, bindings)?;
                 new_bindings.extend(bindings.iter().cloned());
-                if *operator == BinOp::Or {
+                if *operator == LogOp::Or {
                     Some(new_bindings)
                 } else {
                     new_bindings.extend(right.matches(value, bindings)?.iter().cloned());
@@ -156,14 +240,7 @@ impl Pattern {
                 }
             }
             Pattern::Comparision { comparison, rhs } => {
-                let matches = match comparison {
-                    Comparision::Equal => value == rhs,
-                    Comparision::Greater => value > rhs,
-                    Comparision::GreaterEqual => value >= rhs,
-                    Comparision::Less => value < rhs,
-                    Comparision::LessEqual => value <= rhs,
-                    Comparision::NotEqual => value != rhs,
-                };
+                let matches = comparison.compare(value, rhs);
 
                 if matches {
                     Some(bindings.to_vec())
@@ -186,6 +263,31 @@ impl Pattern {
             }
             Pattern::Literal(literal) => {
                 if value == literal {
+                    Some(bindings.to_vec())
+                } else {
+                    None
+                }
+            }
+            Pattern::OperatorComparison { operator, mid, comparison, rhs } => {
+                let (value, mid) = (value.clone(), mid.clone());
+
+                let value = match *operator {
+                    ArithOp::Add => value + mid,
+                    ArithOp::Sub => value - mid,
+                    ArithOp::Mul => value * mid,
+                    ArithOp::Div => value / mid,
+                    ArithOp::Mod => value % mid,
+                };
+
+                let value = if let Some(value) = value {
+                    value
+                } else {
+                    return None;
+                };
+
+                let matches = comparison.compare(&value, rhs);
+
+                if matches {
                     Some(bindings.to_vec())
                 } else {
                     None
@@ -239,4 +341,5 @@ impl Pattern {
     }
 }
 
+#[cfg(feature = "compiler")]
 mod conversions;

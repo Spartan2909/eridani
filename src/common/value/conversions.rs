@@ -44,8 +44,8 @@ impl From<parser::Pattern> for Pattern {
                 right,
             } => {
                 let operator = match operator.kind() {
-                    TokenType::Ampersand => BinOp::And,
-                    TokenType::Pipe => BinOp::Or,
+                    TokenType::Ampersand => LogOp::And,
+                    TokenType::Pipe => LogOp::Or,
                     _ => internal_error!("parsed '{:?}' as pattern binary operator", operator),
                 };
 
@@ -76,6 +76,28 @@ impl From<parser::Pattern> for Pattern {
                 right: Box::new((&*right).into()),
             },
             parser::Pattern::Literal(token) => Pattern::Literal(token.into()),
+            parser::Pattern::OperatorComparison { operator, mid, comparison, rhs } => {
+                let operator = match operator.kind() {
+                    TokenType::Plus => ArithOp::Add,
+                    TokenType::Minus => ArithOp::Sub,
+                    TokenType::Star => ArithOp::Mul,
+                    TokenType::Slash => ArithOp::Div,
+                    TokenType::Mod => ArithOp::Mod,
+                    _ => internal_error!("parsed token '{:?}' as operator", operator),
+                };
+                let mid = mid.into();
+                let comparison = match comparison.kind() {
+                    TokenType::EqualEqual => Comparision::Equal,
+                    TokenType::BangEqual => Comparision::NotEqual,
+                    TokenType::Greater => Comparision::Greater,
+                    TokenType::GreaterEqual => Comparision::GreaterEqual,
+                    TokenType::Less => Comparision::Less,
+                    TokenType::LessEqual => Comparision::LessEqual,
+                    _ => internal_error!("parsed '{:?}' as comparison", comparison),
+                };
+                let rhs = rhs.into();
+                Pattern::OperatorComparison { operator, mid, comparison, rhs }
+            }
             parser::Pattern::Range {
                 lower,
                 upper,
