@@ -1,5 +1,8 @@
 use crate::{
-    common::{Pattern, Value},
+    common::{
+        value::{Pattern, Value},
+        EridaniFunction,
+    },
     compiler::{
         internal_error,
         parser::{self, ParseTree},
@@ -9,8 +12,52 @@ use crate::{
     prelude::*,
 };
 
+use core::{cell::RefCell, fmt::Debug};
+
+pub enum Function {
+    Eridani {
+        name: String,
+        methods: Vec<Method>,
+    },
+    Rust {
+        name: String,
+        func: Box<dyn EridaniFunction>,
+    },
+}
+
+impl Clone for Function {
+    fn clone(&self) -> Self {
+        match self {
+            Function::Eridani { name, methods } => Function::Eridani {
+                name: name.clone(),
+                methods: methods.clone(),
+            },
+            Function::Rust { name, func } => Function::Rust {
+                name: name.clone(),
+                func: func.clone_box(),
+            },
+        }
+    }
+}
+
+impl Debug for Function {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Function::Rust { name, .. } => {
+                write!(f, "Function::Rust {{\n    name: \"{name}\",\n}}")
+            }
+            Function::Eridani { name, .. } => {
+                write!(f, "Function::Eridani {{\n    name: \"{name}\",\n}}")
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
-pub struct Ast {}
+pub struct Method {
+    args: Vec<(Option<String>, Pattern)>,
+    body: Expr,
+}
 
 #[derive(Debug, Clone, Copy)]
 pub enum BinOp {
@@ -55,8 +102,11 @@ pub enum Expr {
         expressions: Vec<Self>,
         line: usize,
     },
-    Literal(Value),
-    //Method(Box<Method>),
+    Literal {
+        value: Value,
+        line: usize,
+    },
+    Method(Box<Method>),
     Unary {
         operator: UnOp,
         right: Box<Self>,
@@ -103,13 +153,30 @@ impl From<parser::Expr> for Expr {
                 line: paren.line(),
             },
             ParseExpr::Grouping(expr) => Self::Grouping(Box::new((&*expr).into())),
-            ParseExpr::Let { pattern, value } => todo!(),
+            ParseExpr::Let { pattern, value } => Self::Let {
+                pattern: pattern.into(),
+                value: Box::new((&*value).into()),
+            },
             ParseExpr::List { expressions, end } => Self::List {
                 expressions: vec_convert(expressions),
                 line: end.line(),
             },
-            ParseExpr::Literal(token) => Self::Literal(token.into()),
-            ParseExpr::Method(method) => todo!(),
+            ParseExpr::Literal(token) => {
+                let line = token.line();
+                Self::Literal {
+                    value: token.into(),
+                    line,
+                }
+            }
+            ParseExpr::Method(method) => {
+                let args: Vec<(Option<String>, Pattern)> = method
+                    .args()
+                    .iter()
+                    .map(|x| (x.name(), x.pattern().into()))
+                    .collect();
+                let body: Expr = method.body().into();
+                Expr::Method(Box::new(Method { args, body }))
+            }
             ParseExpr::Unary { operator, right } => {
                 let operator = match operator.kind() {
                     TokenType::Minus => UnOp::Negate,
@@ -132,6 +199,16 @@ impl From<&parser::Expr> for Expr {
     }
 }
 
-pub fn analyse(_parse_tree: ParseTree) -> Result<Ast> {
+struct Module {
+    submodules: Vec<Rc<RefCell<Module>>>,
+    functions: Vec<Rc<RefCell<Function>>>,
+}
+
+struct Analyser {
+    modules: Vec<Rc<RefCell<Module>>>,
+    current_module: Rc<RefCell<Module>>,
+}
+
+pub fn analyse(parse_tree: ParseTree, entry_point: &str) -> Result<Vec<Rc<Function>>> {
     todo!()
 }

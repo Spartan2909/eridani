@@ -3,6 +3,7 @@ use super::*;
 use crate::compiler::{
     internal_error, parser,
     scanner::{Token, TokenType},
+    Error,
 };
 
 #[cfg(feature = "no_std")]
@@ -26,11 +27,9 @@ impl From<Token> for Value {
 impl From<Token> for Type {
     fn from(value: Token) -> Self {
         match value.lexeme() {
-            "Even" => Type::Even,
             "Integer" => Type::Integer,
             "List" => Type::List,
             "Number" => Type::Number,
-            "Odd" => Type::Odd,
             "String" => Type::String,
             _ => internal_error!("parsed '{:?}' as type", value),
         }

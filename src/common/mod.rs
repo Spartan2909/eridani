@@ -1,70 +1,38 @@
-use crate::prelude::*;
+pub mod value;
+use value::Value;
 
-#[derive(Debug, Clone)]
-pub enum Value {
-    Number(f64),
-    String(String),
+pub struct ArgumentError {
+    description: String,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum Type {
-    Even,
-    Integer,
-    List,
-    Number,
-    Odd,
-    String,
+impl ArgumentError {
+    pub fn new(description: &str) -> ArgumentError {
+        ArgumentError {
+            description: description.to_string(),
+        }
+    }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum Comparision {
-    Equal,
-    NotEqual,
-    Greater,
-    GreaterEqual,
-    Less,
-    LessEqual,
+pub trait EridaniFunction: Fn(&[Value]) -> Result<Value, ArgumentError> {
+    fn clone_box<'a>(&self) -> Box<dyn 'a + EridaniFunction>
+    where
+        Self: 'a;
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum BinOp {
-    And,
-    Or,
+impl<F> EridaniFunction for F
+where
+    F: Fn(&[Value]) -> Result<Value, ArgumentError> + Clone,
+{
+    fn clone_box<'a>(&self) -> Box<dyn 'a + EridaniFunction>
+    where
+        Self: 'a,
+    {
+        Box::new(self.clone())
+    }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum UnOp {
-    Not,
+impl<'a> Clone for Box<dyn 'a + EridaniFunction> {
+    fn clone(&self) -> Self {
+        (**self).clone_box()
+    }
 }
-
-#[derive(Debug, Clone)]
-pub enum Pattern {
-    Binary {
-        left: Box<Pattern>,
-        operator: BinOp,
-        right: Box<Pattern>,
-    },
-    Comparision {
-        comparison: Comparision,
-        rhs: Value,
-    },
-    List {
-        left: Box<Pattern>,
-        right: Box<Pattern>,
-    },
-    Literal(Value),
-    Range {
-        lower: Value,
-        upper: Value,
-        inclusive: bool,
-    },
-    Type(Type),
-    Unary {
-        operator: UnOp,
-        right: Box<Pattern>,
-    },
-    Wildcard(Option<String>),
-}
-
-#[cfg(feature = "compiler")]
-mod conversions;

@@ -27,7 +27,7 @@ pub enum Error {
         line: usize,
         kind: &'static str,
         location: String,
-        message: &'static str,
+        message: String,
     },
 }
 
@@ -43,7 +43,11 @@ impl fmt::Display for Error {
                 location,
                 message,
             } => {
-                write!(f, "[line {}] {} Error{}: {}", line, kind, location, message)
+                if *line == usize::MAX {
+                    write!(f, "[line <native>] {} Error{}: {}", kind, location, message)
+                } else {
+                    write!(f, "[line {}] {} Error{}: {}", line, kind, location, message)
+                }
             }
         }
     }
@@ -58,12 +62,12 @@ impl From<Vec<Error>> for Error {
 impl error::Error for Error {}
 
 impl Error {
-    fn new(line: usize, kind: &'static str, location: &str, message: &'static str) -> Self {
+    pub(crate) fn new(line: usize, kind: &'static str, location: &str, message: &str) -> Self {
         Error::Single {
             line,
             kind,
             location: location.to_string(),
-            message,
+            message: message.to_string(),
         }
     }
 }
@@ -71,12 +75,13 @@ impl Error {
 type Result<T> = result::Result<T, Error>;
 
 #[cfg(feature = "tree_walk")]
-pub use parser::ParseTree;
+pub use analyser::Function;
 
 #[cfg(feature = "tree_walk")]
-pub fn parse(source: &str) -> Result<ParseTree> {
+pub fn parse(source: &str, entry_point: &str) -> Result<Vec<Rc<Function>>> {
     let tokens = scanner::scan(source)?;
-    parser::parse(tokens)
+    let parse_tree = parser::parse(tokens)?;
+    analyser::analyse(parse_tree, entry_point)
 }
 
 pub fn compile(source: &str) -> Result<()> {

@@ -54,6 +54,20 @@ pub struct NamedPattern {
     pattern: Pattern,
 }
 
+impl NamedPattern {
+    pub fn name(&self) -> Option<String> {
+        if let Some(name) = &self.name {
+            Some(name.lexeme().to_string())
+        } else {
+            None
+        }
+    }
+
+    pub fn pattern(&self) -> &Pattern {
+        &self.pattern
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Pattern {
     Binary {

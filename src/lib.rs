@@ -1,5 +1,5 @@
-#![feature(try_blocks)]
-#![cfg_attr(feature = "no_std", no_std, feature(error_in_core))]
+#![feature(try_blocks, negative_impls)]
+#![cfg_attr(feature = "no_std", no_std, feature(core_intrinsics, error_in_core))]
 
 #[cfg(not(any(feature = "compiler", feature = "runtime")))]
 compile_error!("Either feature 'compiler' or feature 'runtime' must be enabled.");
@@ -9,6 +9,7 @@ mod prelude {
     pub use alloc::{
         boxed::Box,
         format,
+        rc::Rc,
         string::{String, ToString},
         vec,
         vec::Vec,
