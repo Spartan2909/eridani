@@ -17,7 +17,7 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     - name: Setup
-      run: rustup component add clippy --toolchain nightly
+      run: rustup default nightly && rustup component add clippy --toolchain nightly
     - name: Build
       run: cargo build --verbose --features="bin"
     - name: Run tests
