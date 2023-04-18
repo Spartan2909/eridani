@@ -21,4 +21,4 @@ jobs:
     - name: Run tests
       run: cargo test --verbose --features="bin"
     - name: Run Clippy
-      run: cargo clippy --verbose --features="bin.
+      run: cargo clippy --verbose --features="bin"
