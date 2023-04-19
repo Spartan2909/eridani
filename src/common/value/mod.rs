@@ -1,6 +1,9 @@
 use crate::prelude::*;
 
-use core::{cmp::Ordering, ops::{Add, Sub, Mul, Div, Rem}};
+use core::{
+    cmp::Ordering,
+    ops::{Add, Div, Mul, Rem, Sub},
+};
 
 #[derive(Debug, Clone)]
 pub enum Value {
@@ -268,7 +271,12 @@ impl Pattern {
                     None
                 }
             }
-            Pattern::OperatorComparison { operator, mid, comparison, rhs } => {
+            Pattern::OperatorComparison {
+                operator,
+                mid,
+                comparison,
+                rhs,
+            } => {
                 let (value, mid) = (value.clone(), mid.clone());
 
                 let value = match *operator {

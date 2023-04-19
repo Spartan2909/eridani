@@ -76,7 +76,12 @@ impl From<parser::Pattern> for Pattern {
                 right: Box::new((&*right).into()),
             },
             parser::Pattern::Literal(token) => Pattern::Literal(token.into()),
-            parser::Pattern::OperatorComparison { operator, mid, comparison, rhs } => {
+            parser::Pattern::OperatorComparison {
+                operator,
+                mid,
+                comparison,
+                rhs,
+            } => {
                 let operator = match operator.kind() {
                     TokenType::Plus => ArithOp::Add,
                     TokenType::Minus => ArithOp::Sub,
@@ -96,7 +101,12 @@ impl From<parser::Pattern> for Pattern {
                     _ => internal_error!("parsed '{:?}' as comparison", comparison),
                 };
                 let rhs = rhs.into();
-                Pattern::OperatorComparison { operator, mid, comparison, rhs }
+                Pattern::OperatorComparison {
+                    operator,
+                    mid,
+                    comparison,
+                    rhs,
+                }
             }
             parser::Pattern::Range {
                 lower,

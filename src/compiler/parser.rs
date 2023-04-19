@@ -448,24 +448,42 @@ impl Parser {
     }
 
     fn operator_comparison(&mut self) -> Result<Pattern> {
-        if match_token!(self, true, TokenType::Plus, TokenType::Minus, TokenType::Star, TokenType::Slash, TokenType::Mod) {
+        if match_token!(
+            self,
+            true,
+            TokenType::Plus,
+            TokenType::Minus,
+            TokenType::Star,
+            TokenType::Slash,
+            TokenType::Mod
+        ) {
             let operator = self.previous().clone();
             let mid = self.consume_any(
                 vec![TokenType::Number, TokenType::String],
                 "Expect literal after operator",
             )?;
-            let comparison = self.consume_any(vec![TokenType::BangEqual,
-                TokenType::EqualEqual,
-                TokenType::Greater,
-                TokenType::GreaterEqual,
-                TokenType::Less,
-                TokenType::LessEqual], "Expect comparison")?;
+            let comparison = self.consume_any(
+                vec![
+                    TokenType::BangEqual,
+                    TokenType::EqualEqual,
+                    TokenType::Greater,
+                    TokenType::GreaterEqual,
+                    TokenType::Less,
+                    TokenType::LessEqual,
+                ],
+                "Expect comparison",
+            )?;
             let rhs = self.consume_any(
                 vec![TokenType::Number, TokenType::String],
                 "Expect literal after comparison",
             )?;
 
-            Ok(Pattern::OperatorComparison { operator, mid, comparison, rhs })
+            Ok(Pattern::OperatorComparison {
+                operator,
+                mid,
+                comparison,
+                rhs,
+            })
         } else {
             self.comparison()
         }
