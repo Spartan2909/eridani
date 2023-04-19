@@ -12,6 +12,12 @@ pub struct ParseTree {
     functions: Vec<Function>,
 }
 
+impl ParseTree {
+    pub fn imports(&self) -> &[ImportTree] {
+        &self.imports
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Function {
     name: Token,
@@ -349,6 +355,8 @@ impl Parser {
 
         if errors.is_empty() {
             Ok(ParseTree { imports, functions })
+        } else if errors.len() == 1 {
+            Err(errors[0].clone())
         } else {
             Err(Error::Collection(errors))
         }
@@ -357,9 +365,17 @@ impl Parser {
     fn import(&mut self, message: &'static str) -> Result<ImportTree> {
         let name = self.consume(TokenType::Identifier, message)?;
 
-        let mut tree = ImportTree { name, next: None };
+        let mut imports = vec![name];
         while self.match_token(TokenType::In, true) {
-            tree.push(self.consume(TokenType::Identifier, "Expect module name after 'in'")?);
+            imports.push(self.consume(TokenType::Identifier, "Expect module name after 'in'")?);
+        }
+        imports.reverse();
+        let mut tree = ImportTree {
+            name: imports[0].clone(),
+            next: None,
+        };
+        for import in &imports[1..] {
+            tree.push(import.clone())
         }
 
         Ok(tree)

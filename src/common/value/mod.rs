@@ -1,5 +1,6 @@
 use crate::prelude::*;
 
+use alloc::collections::BTreeMap;
 use core::{
     cmp::Ordering,
     ops::{Add, Div, Mul, Rem, Sub},
@@ -225,8 +226,8 @@ impl Pattern {
     pub fn matches(
         &self,
         value: &Value,
-        bindings: &[(String, Value)],
-    ) -> Option<Vec<(String, Value)>> {
+        bindings: &BTreeMap<String, Value>,
+    ) -> Option<BTreeMap<String, Value>> {
         match self {
             Pattern::Binary {
                 left,
@@ -234,11 +235,11 @@ impl Pattern {
                 right,
             } => {
                 let mut new_bindings = left.matches(value, bindings)?;
-                new_bindings.extend(bindings.iter().cloned());
+                new_bindings.extend(bindings.clone());
                 if *operator == LogOp::Or {
                     Some(new_bindings)
                 } else {
-                    new_bindings.extend(right.matches(value, bindings)?.iter().cloned());
+                    new_bindings.extend(right.matches(value, bindings)?);
                     Some(new_bindings)
                 }
             }
@@ -246,7 +247,7 @@ impl Pattern {
                 let matches = comparison.compare(value, rhs);
 
                 if matches {
-                    Some(bindings.to_vec())
+                    Some(bindings.clone())
                 } else {
                     None
                 }
@@ -258,7 +259,7 @@ impl Pattern {
                         Some(next) => Value::List((*next).clone()),
                         None => Value::Nothing,
                     };
-                    new_bindings.extend(right.matches(&tail, bindings)?.iter().cloned());
+                    new_bindings.extend(right.matches(&tail, bindings)?);
                     Some(new_bindings)
                 } else {
                     None
@@ -266,7 +267,7 @@ impl Pattern {
             }
             Pattern::Literal(literal) => {
                 if value == literal {
-                    Some(bindings.to_vec())
+                    Some(bindings.clone())
                 } else {
                     None
                 }
@@ -296,7 +297,7 @@ impl Pattern {
                 let matches = comparison.compare(&value, rhs);
 
                 if matches {
-                    Some(bindings.to_vec())
+                    Some(bindings.clone())
                 } else {
                     None
                 }
@@ -317,14 +318,14 @@ impl Pattern {
                 };
 
                 if matches {
-                    Some(bindings.to_vec())
+                    Some(bindings.clone())
                 } else {
                     None
                 }
             }
             Pattern::Type(kind) => {
                 if value.is_kind(*kind) {
-                    Some(bindings.to_vec())
+                    Some(bindings.clone())
                 } else {
                     None
                 }
@@ -334,16 +335,51 @@ impl Pattern {
                     if right.matches(value, bindings).is_some() {
                         None
                     } else {
-                        Some(bindings.to_vec())
+                        Some(bindings.clone())
                     }
                 }
             },
             Pattern::Wildcard(label) => {
-                let mut bindings = bindings.to_vec();
+                let mut bindings = bindings.clone();
                 if let Some(label) = label {
-                    bindings.push((label.clone(), value.clone()));
+                    if let Some(existing_value) = bindings.get(label) {
+                        if value != existing_value {
+                            return None;
+                        }
+                    }
+
+                    bindings.insert(label.clone(), value.clone());
                 }
+
                 Some(bindings)
+            }
+        }
+    }
+
+    pub fn bindings(&self) -> Vec<String> {
+        match self {
+            Pattern::Binary { left, right, .. } => {
+                let mut bindings = left.bindings();
+                bindings.extend(right.bindings());
+                bindings
+            }
+            Pattern::Comparision { .. } => vec![],
+            Pattern::List { left, right } => {
+                let mut bindings = left.bindings();
+                bindings.extend(right.bindings());
+                bindings
+            }
+            Pattern::Literal(_) => vec![],
+            Pattern::OperatorComparison { .. } => vec![],
+            Pattern::Range { .. } => vec![],
+            Pattern::Type(_) => vec![],
+            Pattern::Unary { right, .. } => right.bindings(),
+            Pattern::Wildcard(binding) => {
+                if let Some(binding) = binding {
+                    vec![binding.clone()]
+                } else {
+                    vec![]
+                }
             }
         }
     }

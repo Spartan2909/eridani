@@ -1,4 +1,4 @@
-use core::{fmt, result};
+use core::{cell::RefCell, fmt, result};
 
 #[cfg(feature = "no_std")]
 use core::error;
@@ -7,6 +7,8 @@ use core::error;
 use std::error;
 
 use crate::prelude::*;
+
+use alloc::rc::Rc;
 
 pub(crate) mod analyser;
 pub(crate) mod parser;
@@ -72,22 +74,25 @@ impl Error {
     }
 }
 
-type Result<T> = result::Result<T, Error>;
+pub type Result<T> = result::Result<T, Error>;
 
 #[cfg(feature = "tree_walk")]
 pub use analyser::Function;
 
 #[cfg(feature = "tree_walk")]
-pub fn parse(source: &str, entry_point: &str) -> Result<Vec<Rc<Function>>> {
+pub fn parse(
+    source: &str,
+    entry_point: &str,
+) -> Result<(Rc<RefCell<Function>>, Vec<Rc<RefCell<Function>>>)> {
     let tokens = scanner::scan(source)?;
     let parse_tree = parser::parse(tokens)?;
     analyser::analyse(parse_tree, entry_point)
 }
 
-pub fn compile(source: &str) -> Result<()> {
+pub fn compile(source: &str, entry_point: &str) -> Result<()> {
     let tokens = scanner::scan(source)?;
-
-    let _ = parser::parse(tokens);
+    let parse_tree = parser::parse(tokens)?;
+    let _analysed = analyser::analyse(parse_tree, entry_point)?;
 
     Ok(())
 }

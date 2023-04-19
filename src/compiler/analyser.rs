@@ -5,13 +5,14 @@ use crate::{
     },
     compiler::{
         internal_error,
-        parser::{self, ParseTree},
-        scanner::TokenType,
-        Result,
+        parser::{self, ImportTree, ParseTree},
+        scanner::{self, TokenType},
+        Error, Result,
     },
     prelude::*,
 };
 
+use alloc::{collections::BTreeMap, rc::Rc};
 use core::{cell::RefCell, fmt::Debug};
 
 pub enum Function {
@@ -49,6 +50,15 @@ impl Debug for Function {
             Function::Eridani { name, .. } => {
                 write!(f, "Function::Eridani {{\n    name: \"{name}\",\n}}")
             }
+        }
+    }
+}
+
+impl Function {
+    pub fn name(&self) -> &str {
+        match self {
+            Function::Eridani { name, .. } => name,
+            Function::Rust { name, .. } => name,
         }
     }
 }
@@ -199,16 +209,162 @@ impl From<&parser::Expr> for Expr {
     }
 }
 
+#[derive(Debug)]
+enum Binding {
+    Function(Rc<RefCell<Function>>),
+    Module(Rc<RefCell<Module>>),
+}
+
+#[derive(Debug)]
 struct Module {
+    name: String,
     submodules: Vec<Rc<RefCell<Module>>>,
     functions: Vec<Rc<RefCell<Function>>>,
+    bindings: BTreeMap<String, Binding>,
 }
 
+impl Module {
+    fn new(name: &str) -> Module {
+        Module {
+            name: name.to_string(),
+            submodules: vec![],
+            functions: vec![],
+            bindings: BTreeMap::new(),
+        }
+    }
+
+    fn find(&self, name: &str) -> Option<Binding> {
+        if let Some(module) = self.find_module(name) {
+            Some(Binding::Module(module))
+        } else if let Some(function) = self.find_function(name) {
+            Some(Binding::Function(function))
+        } else {
+            None
+        }
+    }
+
+    fn find_module(&self, name: &str) -> Option<Rc<RefCell<Module>>> {
+        for submodule in &self.submodules {
+            if &submodule.borrow().name == name {
+                return Some(Rc::clone(submodule));
+            }
+        }
+
+        None
+    }
+
+    fn find_function(&self, name: &str) -> Option<Rc<RefCell<Function>>> {
+        for function in &self.functions {
+            if function.borrow().name() == name {
+                return Some(Rc::clone(function));
+            }
+        }
+
+        None
+    }
+
+    fn functions(&self) -> Vec<Rc<RefCell<Function>>> {
+        let mut functions = self.functions.clone();
+        for module in &self.submodules {
+            functions.extend(module.borrow().functions());
+        }
+
+        functions
+    }
+}
+
+#[derive(Debug)]
 struct Analyser {
     modules: Vec<Rc<RefCell<Module>>>,
-    current_module: Rc<RefCell<Module>>,
 }
 
-pub fn analyse(parse_tree: ParseTree, entry_point: &str) -> Result<Vec<Rc<Function>>> {
-    todo!()
+fn find_module(name: &str, line: usize) -> Result<String> {
+    let location = format!(" at {name}");
+    Err(Error::new(
+        line,
+        "Import",
+        &location,
+        "Cannot resolve module name",
+    ))
+}
+
+impl Analyser {
+    fn new() -> Analyser {
+        Analyser { modules: vec![] }
+    }
+
+    fn analyse(
+        &mut self,
+        parse_tree: ParseTree,
+        entry_point: &str,
+    ) -> Result<(Rc<RefCell<Function>>, Vec<Rc<RefCell<Function>>>)> {
+        let root_module = Rc::new(RefCell::new(Module::new("")));
+        self.modules.push(Rc::clone(&root_module));
+        self.analyse_module(parse_tree, Rc::clone(&root_module))?;
+
+        let entry = root_module.borrow().find_function(entry_point);
+        let entry_point = if let Some(entry_point) = entry {
+            entry_point
+        } else {
+            let message = format!("Cannot find entry point '{entry_point}'");
+            return Err(Error::new(1, "Name", "", &message));
+        };
+
+        let functions = root_module.borrow().functions();
+        Ok((entry_point, functions))
+    }
+
+    fn analyse_module(&self, parse_tree: ParseTree, module: Rc<RefCell<Module>>) -> Result<()> {
+        for import in parse_tree.imports() {
+            let module_parse_tree = parser::parse(scanner::scan(&find_module(
+                import.name().lexeme(),
+                import.line(),
+            )?)?)?;
+            let submodule = Rc::new(RefCell::new(Module::new(import.name().lexeme())));
+            module.borrow_mut().submodules.push(Rc::clone(&submodule));
+            self.analyse_module(module_parse_tree, Rc::clone(&submodule))?;
+
+            let mut import = import.clone();
+            let mut import_module = Rc::clone(&submodule);
+            let mut binding = Binding::Module(Rc::clone(&import_module));
+            loop {
+                if let Some(next) = import.next() {
+                    let tmp: &ImportTree = &next;
+                    import = tmp.clone();
+
+                    binding = import_module
+                        .borrow()
+                        .find(import.name().lexeme())
+                        .unwrap_or(Err(Error::new(
+                            import.line(),
+                            "Import",
+                            &format!(" at '{}'", import.name().lexeme()),
+                            "No such item",
+                        ))?);
+
+                    if import.next().is_some() {
+                        if let Binding::Module(module) = &binding {
+                            import_module = Rc::clone(module);
+                        } else if let Binding::Function(_) = &binding {
+                            let location = format!(" at {}", import.name().lexeme());
+                            return Err(Error::new(import.line(), "Import", &location, "Cannot import from function"));
+                        }
+                    }
+                } else {
+                    break;
+                }
+            }
+
+            submodule.borrow_mut().bindings.insert(import.name().lexeme().to_string(), binding);
+        }
+
+        Ok(())
+    }
+}
+
+pub fn analyse(
+    parse_tree: ParseTree,
+    entry_point: &str,
+) -> Result<(Rc<RefCell<Function>>, Vec<Rc<RefCell<Function>>>)> {
+    Analyser::new().analyse(parse_tree, entry_point)
 }
