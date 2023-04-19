@@ -1,4 +1,5 @@
-pub mod value;
+pub(crate) mod natives;
+pub(crate) mod value;
 use value::Value;
 
 pub struct ArgumentError {
