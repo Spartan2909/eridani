@@ -347,7 +347,12 @@ impl Analyser {
                             import_module = Rc::clone(module);
                         } else if let Binding::Function(_) = &binding {
                             let location = format!(" at {}", import.name().lexeme());
-                            return Err(Error::new(import.line(), "Import", &location, "Cannot import from function"));
+                            return Err(Error::new(
+                                import.line(),
+                                "Import",
+                                &location,
+                                "Cannot import from function",
+                            ));
                         }
                     }
                 } else {
@@ -355,7 +360,10 @@ impl Analyser {
                 }
             }
 
-            submodule.borrow_mut().bindings.insert(import.name().lexeme().to_string(), binding);
+            submodule
+                .borrow_mut()
+                .bindings
+                .insert(import.name().lexeme().to_string(), binding);
         }
 
         Ok(())

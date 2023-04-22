@@ -27,7 +27,7 @@ mod compiler;
 pub use compiler::compile;
 
 #[cfg(feature = "tree_walk")]
-pub use compiler::{Function, parse};
+pub use compiler::{parse, Function};
 
 #[cfg(feature = "runtime")]
 mod runtime;
