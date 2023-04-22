@@ -139,7 +139,7 @@ pub enum Expr {
     Variable(ImportTree),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ImportTree {
     name: Token,
     next: Option<Box<ImportTree>>,

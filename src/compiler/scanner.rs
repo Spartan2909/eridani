@@ -65,7 +65,7 @@ pub trait OptionalKind {
     fn optional_kind(&self) -> Option<TokenType>;
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Token {
     kind: TokenType,
     lexeme: String,

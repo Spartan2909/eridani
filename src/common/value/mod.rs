@@ -136,7 +136,7 @@ impl PartialOrd for List {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Type {
     Integer,
     List,
@@ -144,7 +144,7 @@ pub enum Type {
     String,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Comparision {
     Equal,
     NotEqual,
@@ -173,7 +173,7 @@ pub enum LogOp {
     Or,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArithOp {
     Add,
     Sub,
@@ -182,12 +182,12 @@ pub enum ArithOp {
     Mod,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnOp {
     Not,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Pattern {
     Binary {
         left: Box<Pattern>,

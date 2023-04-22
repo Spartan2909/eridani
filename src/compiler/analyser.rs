@@ -13,12 +13,12 @@ use crate::{
 };
 
 use alloc::{collections::BTreeMap, rc::Rc};
-use core::{cell::RefCell, fmt::Debug};
+use core::{cell::RefCell, fmt::Debug, iter};
 
 pub enum Function {
     Eridani {
         name: String,
-        methods: Vec<Method>,
+        methods: Vec<RefCell<Method>>,
     },
     Rust {
         name: String,
@@ -54,6 +54,49 @@ impl Debug for Function {
     }
 }
 
+impl PartialEq for Function {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                Function::Eridani {
+                    name: name1,
+                    methods: methods1,
+                },
+                Function::Eridani {
+                    name: name2,
+                    methods: methods2,
+                },
+            ) => {
+                if name1 != name2 {
+                    return false;
+                }
+
+                for (method1, method2) in iter::zip(methods1, methods2) {
+                    if method1.as_ptr() != method2.as_ptr() {
+                        return false;
+                    }
+                }
+
+                true
+            }
+            (
+                Function::Rust {
+                    name: name1,
+                    func: _,
+                },
+                Function::Rust {
+                    name: name2,
+                    func: _,
+                },
+            ) => {
+                // TODO add proper comparison
+                name1 == name2
+            }
+            _ => false,
+        }
+    }
+}
+
 impl Function {
     pub fn name(&self) -> &str {
         match self {
@@ -61,17 +104,40 @@ impl Function {
             Function::Rust { name, .. } => name,
         }
     }
+
+    fn resolve_placeholders(&self, module: &Rc<RefCell<Module>>) -> Result<()> {
+        if let Function::Eridani { methods, .. } = self {
+            for method in methods {
+                method.borrow_mut().body.resolve_placeholders(module)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn methods(&self) -> Vec<RefCell<Method>> {
+        match self {
+            Function::Eridani { methods, .. } => methods.to_vec(),
+            Function::Rust { .. } => vec![],
+        }
+    }
 }
 
 pub type Program = (Rc<RefCell<Function>>, Vec<Rc<RefCell<Function>>>);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Method {
     args: Vec<(Option<String>, Pattern)>,
     body: Expr,
 }
 
-#[derive(Debug, Clone, Copy)]
+impl Method {
+    pub fn args(&self) -> &Vec<(Option<String>, Pattern)> {
+        &self.args
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BinOp {
     Add,
     Sub,
@@ -80,16 +146,12 @@ pub enum BinOp {
     Mod,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum UnOp {
     Negate,
 }
 
-fn vec_convert(value: Vec<parser::Expr>) -> Vec<Expr> {
-    value.into_iter().map(|x| x.into()).collect::<Vec<Expr>>()
-}
-
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Binary {
         left: Box<Self>,
@@ -105,6 +167,7 @@ pub enum Expr {
         arguments: Vec<Self>,
         line: usize,
     },
+    Function(Rc<RefCell<Function>>),
     Grouping(Box<Self>),
     Let {
         pattern: Pattern,
@@ -119,95 +182,106 @@ pub enum Expr {
         line: usize,
     },
     Method(Box<Method>),
+    PlaceHolder(ImportTree),
     Unary {
         operator: UnOp,
         right: Box<Self>,
     },
-    //Variable(ImportTree),
+    Variable(String),
 }
 
-impl From<parser::Expr> for Expr {
-    fn from(value: parser::Expr) -> Self {
-        use parser::Expr as ParseExpr;
-
-        match value {
-            ParseExpr::Binary {
-                left,
-                operator,
-                right,
+impl Expr {
+    fn resolve_placeholders(&mut self, module: &Rc<RefCell<Module>>) -> Result<()> {
+        match self {
+            Self::Binary { left, right, .. } => {
+                left.resolve_placeholders(module)?;
+                right.resolve_placeholders(module)?;
+            }
+            Self::Block { body, .. } => {
+                for expr in body {
+                    expr.resolve_placeholders(module)?;
+                }
+            }
+            Self::Call {
+                callee, arguments, ..
             } => {
-                let operator = match operator.kind() {
-                    TokenType::Plus => BinOp::Add,
-                    TokenType::Minus => BinOp::Sub,
-                    TokenType::Star => BinOp::Mul,
-                    TokenType::Slash => BinOp::Div,
-                    TokenType::Mod => BinOp::Mod,
-                    _ => internal_error!("parsed token '{:?}' as operator", operator),
-                };
+                callee.resolve_placeholders(module)?;
+                for expr in arguments {
+                    expr.resolve_placeholders(module)?;
+                }
+            }
+            Self::Function(_) => {}
+            Self::Grouping(expr) => expr.resolve_placeholders(module)?,
+            Self::Let { value, .. } => value.resolve_placeholders(module)?,
+            Self::List { expressions, .. } => {
+                for expr in expressions {
+                    expr.resolve_placeholders(module)?;
+                }
+            }
+            Self::Literal { .. } => {}
+            Self::Method(method) => method.body.resolve_placeholders(module)?,
+            Self::PlaceHolder(placeholder) => {
+                if placeholder.next().is_some() {
+                    unreachable!("currently no way to create a placeholder from an import tree");
+                } else {
+                    let function = module
+                        .borrow()
+                        .find_function(placeholder.name().lexeme())
+                        .unwrap_or_else(|| internal_error!("dangling placeholder"));
 
-                Self::Binary {
-                    left: Box::new((&*left).into()),
-                    operator,
-                    right: Box::new((&*right).into()),
+                    *self = Self::Function(function);
                 }
             }
-            ParseExpr::Block { body, end } => Self::Block {
-                body: vec_convert(body),
-                line: end.line(),
-            },
-            ParseExpr::Call {
-                callee,
-                paren,
-                arguments,
-            } => Self::Call {
-                callee: Box::new((&*callee).into()),
-                arguments: vec_convert(arguments),
-                line: paren.line(),
-            },
-            ParseExpr::Grouping(expr) => Self::Grouping(Box::new((&*expr).into())),
-            ParseExpr::Let { pattern, value } => Self::Let {
-                pattern: pattern.into(),
-                value: Box::new((&*value).into()),
-            },
-            ParseExpr::List { expressions, end } => Self::List {
-                expressions: vec_convert(expressions),
-                line: end.line(),
-            },
-            ParseExpr::Literal(token) => {
-                let line = token.line();
-                Self::Literal {
-                    value: token.into(),
-                    line,
-                }
-            }
-            ParseExpr::Method(method) => {
-                let args: Vec<(Option<String>, Pattern)> = method
-                    .args()
-                    .iter()
-                    .map(|x| (x.name(), x.pattern().into()))
-                    .collect();
-                let body: Expr = method.body().into();
-                Expr::Method(Box::new(Method { args, body }))
-            }
-            ParseExpr::Unary { operator, right } => {
-                let operator = match operator.kind() {
-                    TokenType::Minus => UnOp::Negate,
-                    _ => internal_error!("parsed token {:?} as unary", operator),
-                };
-
-                Self::Unary {
-                    operator,
-                    right: Box::new((&*right).into()),
-                }
-            }
-            ParseExpr::Variable(var) => todo!(),
+            Self::Unary { right, .. } => right.resolve_placeholders(module)?,
+            Self::Variable(_) => {}
         }
-    }
-}
 
-impl From<&parser::Expr> for Expr {
-    fn from(value: &parser::Expr) -> Self {
-        value.clone().into()
+        Ok(())
+    }
+
+    fn calls(&self) -> Vec<Rc<RefCell<Function>>> {
+        match self {
+            Self::Binary { left, right, .. } => {
+                let mut calls = left.calls();
+                calls.append(&mut right.calls());
+                calls
+            }
+            Self::Block { body, .. } => {
+                let mut calls = vec![];
+                for expr in body {
+                    calls.append(&mut expr.calls());
+                }
+
+                calls
+            }
+            Self::Call {
+                callee, arguments, ..
+            } => {
+                let mut calls = callee.calls();
+
+                for expr in arguments {
+                    calls.append(&mut expr.calls())
+                }
+
+                calls
+            }
+            Self::Function(function) => vec![Rc::clone(function)],
+            Self::Grouping(expr) => expr.calls(),
+            Self::Let { value, .. } => value.calls(),
+            Self::List { expressions, .. } => {
+                let mut calls = vec![];
+                for expr in expressions {
+                    calls.append(&mut expr.calls());
+                }
+
+                calls
+            }
+            Self::Literal { .. } => vec![],
+            Self::Method(method) => method.body.calls(),
+            Self::PlaceHolder(_) => internal_error!("called 'calls' on placeholder"),
+            Self::Unary { right, .. } => right.calls(),
+            Self::Variable(_) => vec![],
+        }
     }
 }
 
@@ -217,11 +291,57 @@ enum Binding {
     Module(Rc<RefCell<Module>>),
 }
 
+impl From<OptionalBinding> for Option<Binding> {
+    fn from(value: OptionalBinding) -> Self {
+        match value {
+            OptionalBinding::Function(f) => Some(Binding::Function(f)),
+            OptionalBinding::Module(m) => Some(Binding::Module(m)),
+            OptionalBinding::None => None,
+        }
+    }
+}
+
+#[derive(Debug)]
+enum OptionalBinding {
+    Function(Rc<RefCell<Function>>),
+    Module(Rc<RefCell<Module>>),
+    None,
+}
+
+impl OptionalBinding {
+    fn unwrap_or(self, default: Binding) -> Binding {
+        match self {
+            OptionalBinding::Function(f) => Binding::Function(f),
+            OptionalBinding::Module(m) => Binding::Module(m),
+            OptionalBinding::None => default,
+        }
+    }
+}
+
+impl From<Binding> for OptionalBinding {
+    fn from(value: Binding) -> Self {
+        match value {
+            Binding::Function(f) => OptionalBinding::Function(f),
+            Binding::Module(m) => OptionalBinding::Module(m),
+        }
+    }
+}
+
+impl From<Option<Binding>> for OptionalBinding {
+    fn from(value: Option<Binding>) -> Self {
+        match value {
+            Some(binding) => binding.into(),
+            None => OptionalBinding::None,
+        }
+    }
+}
+
 #[derive(Debug)]
 struct Module {
     name: String,
     submodules: Vec<Rc<RefCell<Module>>>,
     functions: Vec<Rc<RefCell<Function>>>,
+    function_names: Vec<String>,
     bindings: BTreeMap<String, Binding>,
 }
 
@@ -231,23 +351,24 @@ impl Module {
             name: name.to_string(),
             submodules: vec![],
             functions: vec![],
+            function_names: vec![],
             bindings: BTreeMap::new(),
         }
     }
 
-    fn find(&self, name: &str) -> Option<Binding> {
+    fn find(&self, name: &str) -> OptionalBinding {
         if let Some(module) = self.find_module(name) {
-            Some(Binding::Module(module))
+            OptionalBinding::Module(module)
         } else if let Some(function) = self.find_function(name) {
-            Some(Binding::Function(function))
+            OptionalBinding::Function(function)
         } else {
-            None
+            OptionalBinding::None
         }
     }
 
     fn find_module(&self, name: &str) -> Option<Rc<RefCell<Module>>> {
         for submodule in &self.submodules {
-            if &submodule.borrow().name == name {
+            if submodule.borrow().name == name {
                 return Some(Rc::clone(submodule));
             }
         }
@@ -275,11 +396,6 @@ impl Module {
     }
 }
 
-#[derive(Debug)]
-struct Analyser {
-    modules: Vec<Rc<RefCell<Module>>>,
-}
-
 fn find_module(name: &str, line: usize) -> Result<String> {
     let location = format!(" at {name}");
     Err(Error::new(
@@ -290,91 +406,249 @@ fn find_module(name: &str, line: usize) -> Result<String> {
     ))
 }
 
-impl Analyser {
-    fn new() -> Analyser {
-        Analyser { modules: vec![] }
-    }
+fn resolve_import(
+    mut import: ImportTree,
+    mut import_module: Rc<RefCell<Module>>,
+) -> Result<Binding> {
+    let mut binding = Binding::Module(Rc::clone(&import_module));
+    while let Some(next) = import.next() {
+        let tmp: &ImportTree = next;
+        import = tmp.clone();
 
-    fn analyse(
-        &mut self,
-        parse_tree: ParseTree,
-        entry_point: &str,
-    ) -> Result<(Rc<RefCell<Function>>, Vec<Rc<RefCell<Function>>>)> {
-        let root_module = Rc::new(RefCell::new(Module::new("")));
-        self.modules.push(Rc::clone(&root_module));
-        self.analyse_module(parse_tree, Rc::clone(&root_module))?;
-
-        let entry = root_module.borrow().find_function(entry_point);
-        let entry_point = if let Some(entry_point) = entry {
-            entry_point
-        } else {
-            let message = format!("Cannot find entry point '{entry_point}'");
-            return Err(Error::new(1, "Name", "", &message));
-        };
-
-        let functions = root_module.borrow().functions();
-        Ok((entry_point, functions))
-    }
-
-    fn analyse_module(&self, parse_tree: ParseTree, module: Rc<RefCell<Module>>) -> Result<()> {
-        for import in parse_tree.imports() {
-            let module_parse_tree = parser::parse(scanner::scan(&find_module(
-                import.name().lexeme(),
+        binding = import_module
+            .borrow()
+            .find(import.name().lexeme())
+            .unwrap_or(Err(Error::new(
                 import.line(),
-            )?)?)?;
-            let submodule = Rc::new(RefCell::new(Module::new(import.name().lexeme())));
-            module.borrow_mut().submodules.push(Rc::clone(&submodule));
-            self.analyse_module(module_parse_tree, Rc::clone(&submodule))?;
+                "Import",
+                &format!(" at '{}'", import.name().lexeme()),
+                "No such item",
+            ))?);
 
-            let mut import = import.clone();
-            let mut import_module = Rc::clone(&submodule);
-            let mut binding = Binding::Module(Rc::clone(&import_module));
-            loop {
-                if let Some(next) = import.next() {
-                    let tmp: &ImportTree = &next;
-                    import = tmp.clone();
-
-                    binding = import_module
-                        .borrow()
-                        .find(import.name().lexeme())
-                        .unwrap_or(Err(Error::new(
-                            import.line(),
-                            "Import",
-                            &format!(" at '{}'", import.name().lexeme()),
-                            "No such item",
-                        ))?);
-
-                    if import.next().is_some() {
-                        if let Binding::Module(module) = &binding {
-                            import_module = Rc::clone(module);
-                        } else if let Binding::Function(_) = &binding {
-                            let location = format!(" at {}", import.name().lexeme());
-                            return Err(Error::new(
-                                import.line(),
-                                "Import",
-                                &location,
-                                "Cannot import from function",
-                            ));
-                        }
-                    }
-                } else {
-                    break;
-                }
+        if import.next().is_some() {
+            if let Binding::Module(module) = &binding {
+                import_module = Rc::clone(module);
+            } else if let Binding::Function(_) = &binding {
+                let location = format!(" at {}", import.name().lexeme());
+                return Err(Error::new(
+                    import.line(),
+                    "Import",
+                    &location,
+                    "Cannot import from function",
+                ));
             }
-
-            submodule
-                .borrow_mut()
-                .bindings
-                .insert(import.name().lexeme().to_string(), binding);
         }
-
-        Ok(())
     }
+
+    Ok(binding)
 }
 
-pub fn analyse(
-    parse_tree: ParseTree,
-    entry_point: &str,
-) -> Result<(Rc<RefCell<Function>>, Vec<Rc<RefCell<Function>>>)> {
-    Analyser::new().analyse(parse_tree, entry_point)
+pub fn analyse(parse_tree: ParseTree, entry_point: &str) -> Result<Program> {
+    let root_module = Rc::new(RefCell::new(Module::new("")));
+    analyse_module(parse_tree, Rc::clone(&root_module))?;
+
+    let entry_point = match root_module.borrow().find_function(entry_point) {
+        Some(entry_point) => entry_point,
+        None => {
+            let message = format!("Cannot find entry point '{entry_point}'");
+            return Err(Error::new(1, "Name", "", &message));
+        }
+    };
+
+    let mut functions = root_module.borrow().functions();
+
+    let mut calls = vec![];
+    for function in &functions {
+        for method in function.borrow().methods() {
+            for call in method.borrow().body.calls() {
+                if !calls.contains(&call) && &call != function {
+                    calls.push(call);
+                }
+            }
+        }
+    }
+
+    let mut to_remove = vec![];
+    for (i, function) in functions.iter().enumerate() {
+        if !calls.contains(function) {
+            to_remove.push(i);
+        }
+    }
+
+    for (removed, index) in to_remove.iter().enumerate() {
+        functions.remove(*index - removed);
+    }
+
+    functions.push(Rc::clone(&entry_point));
+
+    Ok((entry_point, functions))
+}
+
+fn analyse_module(parse_tree: ParseTree, module: Rc<RefCell<Module>>) -> Result<()> {
+    for import in parse_tree.imports() {
+        let module_parse_tree = parser::parse(scanner::scan(&find_module(
+            import.name().lexeme(),
+            import.line(),
+        )?)?)?;
+        let submodule = Rc::new(RefCell::new(Module::new(import.name().lexeme())));
+        module.borrow_mut().submodules.push(Rc::clone(&submodule));
+        analyse_module(module_parse_tree, Rc::clone(&submodule))?;
+
+        let binding = resolve_import(import.clone(), Rc::clone(&submodule))?;
+
+        submodule
+            .borrow_mut()
+            .bindings
+            .insert(import.name().lexeme().to_string(), binding);
+    }
+
+    for function in parse_tree.functions() {
+        module
+            .borrow_mut()
+            .function_names
+            .push(function.name().lexeme().to_string())
+    }
+
+    for (i, function) in parse_tree.functions().iter().enumerate() {
+        let name = module.borrow().function_names[i].clone();
+
+        let mut methods = vec![];
+        for method in function.methods() {
+            let mut args = vec![];
+
+            for arg in method.args() {
+                args.push((arg.name(), arg.pattern().into()))
+            }
+
+            let body = convert_expr(method.body(), Rc::clone(&module))?;
+
+            methods.push(RefCell::new(Method { args, body }));
+        }
+
+        module
+            .borrow_mut()
+            .functions
+            .push(Rc::new(RefCell::new(Function::Eridani { name, methods })))
+    }
+
+    for function in &module.borrow().functions {
+        function.borrow().resolve_placeholders(&module)?;
+    }
+
+    Ok(())
+}
+
+fn convert_expr(expr: &parser::Expr, module: Rc<RefCell<Module>>) -> Result<Expr> {
+    use parser::Expr as ParseExpr;
+
+    let result = match expr {
+        ParseExpr::Binary {
+            left,
+            operator,
+            right,
+        } => {
+            let operator = match operator.kind() {
+                TokenType::Plus => BinOp::Add,
+                TokenType::Minus => BinOp::Sub,
+                TokenType::Star => BinOp::Mul,
+                TokenType::Slash => BinOp::Div,
+                TokenType::Mod => BinOp::Mod,
+                _ => internal_error!("parsed token '{:?}' as operator", operator),
+            };
+
+            Expr::Binary {
+                left: Box::new(convert_expr(left, Rc::clone(&module))?),
+                operator,
+                right: Box::new(convert_expr(right, module)?),
+            }
+        }
+        ParseExpr::Block { body, end } => Expr::Block {
+            body: convert_exprs(body, &module)?,
+            line: end.line(),
+        },
+        ParseExpr::Call {
+            callee,
+            paren,
+            arguments,
+        } => Expr::Call {
+            callee: Box::new(convert_expr(callee, Rc::clone(&module))?),
+            arguments: convert_exprs(arguments, &module)?,
+            line: paren.line(),
+        },
+        ParseExpr::Grouping(expr) => {
+            Expr::Grouping(Box::new(convert_expr(expr, Rc::clone(&module))?))
+        }
+        ParseExpr::Let { pattern, value } => Expr::Let {
+            pattern: pattern.into(),
+            value: Box::new(convert_expr(value, module)?),
+        },
+        ParseExpr::List { expressions, end } => Expr::List {
+            expressions: convert_exprs(expressions, &module)?,
+            line: end.line(),
+        },
+        ParseExpr::Literal(token) => {
+            let line = token.line();
+            Expr::Literal {
+                value: token.into(),
+                line,
+            }
+        }
+        ParseExpr::Method(method) => {
+            let args = method
+                .args()
+                .iter()
+                .map(|x| (x.name(), x.pattern().into()))
+                .collect();
+            let body = convert_expr(method.body(), module)?;
+            Expr::Method(Box::new(Method { args, body }))
+        }
+        ParseExpr::Unary { operator, right } => {
+            let operator = match operator.kind() {
+                TokenType::Minus => UnOp::Negate,
+                _ => internal_error!("parsed token {:?} as unary", operator),
+            };
+
+            Expr::Unary {
+                operator,
+                right: Box::new(convert_expr(right, module)?),
+            }
+        }
+        ParseExpr::Variable(var) => {
+            if var.next().is_some() {
+                let item = resolve_import(var.clone(), module)?;
+
+                let function = match item {
+                    Binding::Function(f) => f,
+                    Binding::Module(module) => {
+                        let location = format!(" at {}", module.borrow().name);
+                        return Err(Error::new(
+                            var.line(),
+                            "Import",
+                            &location,
+                            "Expected function, found module",
+                        ));
+                    }
+                };
+
+                Expr::Function(function)
+            } else if module
+                .borrow()
+                .function_names
+                .contains(&var.name().lexeme().to_string())
+            {
+                Expr::PlaceHolder(var.clone())
+            } else {
+                Expr::Variable(var.name().lexeme().to_string())
+            }
+        }
+    };
+
+    Ok(result)
+}
+
+fn convert_exprs(value: &[parser::Expr], module: &Rc<RefCell<Module>>) -> Result<Vec<Expr>> {
+    value
+        .iter()
+        .map(|x| convert_expr(x, Rc::clone(module)))
+        .collect()
 }
