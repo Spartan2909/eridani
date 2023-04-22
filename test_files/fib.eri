@@ -4,9 +4,3 @@ fibonacci is
     (n: Integer & > 0) do
         fibonacci(n - 1) + fibonacci(n - 2)
     end
-
-unused is
-    () unused()
-
-main is
-    () print(fibonacci(5))

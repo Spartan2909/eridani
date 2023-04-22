@@ -18,6 +18,9 @@ use alloc::{
 };
 use core::{cell::RefCell, fmt::Debug, iter};
 
+#[cfg(not(feature = "no_std"))]
+use std::{fs, path};
+
 pub enum Function {
     Eridani {
         name: String,
@@ -227,10 +230,20 @@ impl Expr {
                 if placeholder.next().is_some() {
                     unreachable!("currently no way to create a placeholder from an import tree");
                 } else {
-                    let function = module
+                    let function = if let Some(function) = module
                         .borrow()
-                        .find_function(placeholder.name().lexeme())
-                        .unwrap_or_else(|| internal_error!("dangling placeholder"));
+                        .find_function(placeholder.name().lexeme()) {
+                            function
+                        } else if let Some(binding) = module.borrow().bindings.get(placeholder.name().lexeme()) {
+                            if let Binding::Function(f) = binding {
+                                f.clone()
+                            } else {
+                                internal_error!("placeholder pointing to module")
+                            }
+                        } else {
+                            internal_error!("dangling placeholder")
+                        };
+                        
 
                     *self = Self::Function(function);
                 }
@@ -294,47 +307,11 @@ enum Binding {
     Module(Rc<RefCell<Module>>),
 }
 
-impl From<OptionalBinding> for Option<Binding> {
-    fn from(value: OptionalBinding) -> Self {
-        match value {
-            OptionalBinding::Function(f) => Some(Binding::Function(f)),
-            OptionalBinding::Module(m) => Some(Binding::Module(m)),
-            OptionalBinding::None => None,
-        }
-    }
-}
-
-#[derive(Debug)]
-enum OptionalBinding {
-    Function(Rc<RefCell<Function>>),
-    Module(Rc<RefCell<Module>>),
-    None,
-}
-
-impl OptionalBinding {
-    fn unwrap_or(self, default: Binding) -> Binding {
+impl Binding {
+    fn name(&self) -> String {
         match self {
-            OptionalBinding::Function(f) => Binding::Function(f),
-            OptionalBinding::Module(m) => Binding::Module(m),
-            OptionalBinding::None => default,
-        }
-    }
-}
-
-impl From<Binding> for OptionalBinding {
-    fn from(value: Binding) -> Self {
-        match value {
-            Binding::Function(f) => OptionalBinding::Function(f),
-            Binding::Module(m) => OptionalBinding::Module(m),
-        }
-    }
-}
-
-impl From<Option<Binding>> for OptionalBinding {
-    fn from(value: Option<Binding>) -> Self {
-        match value {
-            Some(binding) => binding.into(),
-            None => OptionalBinding::None,
+            Binding::Function(f) => f.borrow().name().to_string(),
+            Binding::Module(m) => m.borrow().name.clone(),
         }
     }
 }
@@ -361,13 +338,13 @@ impl Module {
         }
     }
 
-    fn find(&self, name: &str) -> OptionalBinding {
+    fn find(&self, name: &str) -> Option<Binding> {
         if let Some(module) = self.find_module(name) {
-            OptionalBinding::Module(module)
+            Some(Binding::Module(module))
         } else if let Some(function) = self.find_function(name) {
-            OptionalBinding::Function(function)
+            Some(Binding::Function(function))
         } else {
-            OptionalBinding::None
+            None
         }
     }
 
@@ -393,11 +370,16 @@ impl Module {
 }
 
 /// Returns the module, and the path to the file containing that code, if it exists
-fn find_module(
+fn resolve_module(
     name: &str,
+    importing_module: Rc<RefCell<Module>>,
     _modules: &mut Vec<Rc<RefCell<Module>>>,
     line: usize,
 ) -> Result<Rc<RefCell<Module>>> {
+    if let Some(module) = importing_module.borrow().find_module(name) {
+        return Ok(module);
+    }
+
     let location = format!(" at {name}");
     Err(Error::new(
         line,
@@ -407,11 +389,41 @@ fn find_module(
     ))
 }
 
-fn find_submodule(
+/// Returns the module, and the path to the file containing that code, if it exists
+fn resolve_submodule(
     name: &str,
     line: usize,
-    _supermodule_origin: Option<&str>,
+    supermodule_origin: Option<&str>,
 ) -> Result<(String, String)> {
+    #[cfg(not(feature = "no_std"))]
+    if let Some(supermodule_origin) = supermodule_origin {
+        let supermodule_origin = path::PathBuf::from(supermodule_origin);
+        let supermodule_filename = supermodule_origin
+            .file_name()
+            .unwrap_or_else(|| internal_error!("set invalid module path"));
+        let supermodule_folder = supermodule_origin
+            .parent()
+            .unwrap_or_else(|| internal_error!("set invalid module path"));
+        if supermodule_filename == "mod.eri" {
+            let mut module_file = supermodule_folder.to_owned();
+            let file_name = path::PathBuf::from(format!("{name}.eri"));
+            module_file.push(file_name);
+            if fs::try_exists(&module_file).unwrap_or(false) {
+                let contents = fs::read_to_string(&module_file)
+                    .unwrap_or_else(|_| internal_error!("read from invalid file"));
+                return Ok((contents, module_file.to_string_lossy().into()));
+            }
+            let mut module_in_folder = supermodule_folder.to_owned();
+            let file_name = path::PathBuf::from(format!("{name}/mod.eri"));
+            module_in_folder.push(file_name);
+            if fs::try_exists(&module_file).unwrap_or(false) {
+                let contents = fs::read_to_string(&module_file)
+                    .unwrap_or_else(|_| internal_error!("read from invalid file"));
+                return Ok((contents, module_in_folder.to_string_lossy().into()));
+            }
+        }
+    }
+
     let location = format!(" at {name}");
     Err(Error::new(
         line,
@@ -445,15 +457,17 @@ fn resolve_import(
             binding = Binding::Module(Rc::clone(&supermodule));
             import_module = supermodule;
         } else {
-            binding = import_module
-                .borrow()
-                .find(import.name().lexeme())
-                .unwrap_or(Err(Error::new(
-                    import.line(),
-                    "Import",
-                    &format!(" at '{}'", import.name().lexeme()),
-                    "No such item",
-                ))?);
+            binding = match import_module.borrow().find(import.name().lexeme()) {
+                Some(binding) => binding,
+                None => {
+                    return Err(Error::new(
+                        import.line(),
+                        "Import",
+                        &format!(" at '{}'", import.name().lexeme()),
+                        "No such item",
+                    ));
+                }
+            };
 
             if import.next().is_some() {
                 if let Binding::Module(module) = &binding {
@@ -534,10 +548,9 @@ fn analyse_module(
     module: Rc<RefCell<Module>>,
     modules: &mut Vec<Rc<RefCell<Module>>>,
 ) -> Result<()> {
-    dbg!(&parse_tree);
     for module_name in parse_tree.modules() {
         let (submodule, submodule_origin) =
-            find_submodule(module_name.lexeme(), module_name.line(), source_origin)?;
+            resolve_submodule(module_name.lexeme(), module_name.line(), source_origin)?;
         let submodule_parse_tree = parser::parse(scanner::scan(&submodule)?)?;
         let submodule = Rc::new(RefCell::new(Module::new(module_name.lexeme())));
         modules.push(Rc::clone(&submodule));
@@ -555,15 +568,20 @@ fn analyse_module(
     }
 
     for import in parse_tree.imports() {
-        let imported_module = find_module(import.name().lexeme(), modules, import.line())?;
+        let imported_module = resolve_module(
+            import.name().lexeme(),
+            Rc::clone(&module),
+            modules,
+            import.line(),
+        )?;
         modules.push(Rc::clone(&imported_module));
 
         let binding = resolve_import(import.clone(), Rc::clone(&imported_module))?;
 
-        imported_module
+        module
             .borrow_mut()
             .bindings
-            .insert(import.name().lexeme().to_string(), binding);
+            .insert(binding.name(), binding);
     }
 
     for function in parse_tree.functions() {
@@ -701,6 +719,12 @@ fn convert_expr(expr: &parser::Expr, module: Rc<RefCell<Module>>) -> Result<Expr
                 .contains(&var.name().lexeme().to_string())
             {
                 Expr::PlaceHolder(var.clone())
+            } else if let Some(binding) = module.borrow().bindings.get(var.name().lexeme()) {
+                if let Binding::Function(_) = binding {
+                    Expr::PlaceHolder(var.clone())
+                } else {
+                    Expr::Variable(var.name().lexeme().to_string())
+                }
             } else {
                 Expr::Variable(var.name().lexeme().to_string())
             }

@@ -29,12 +29,9 @@ fn main() {
         "main".to_string()
     };
 
-    let contents =
-        fs::read_to_string(args.file_path.clone()).expect("Should have been able to read the file");
+    let file_path =
+        fs::canonicalize(&args.file_path).expect("Should have been able to read the file");
+    let contents = fs::read_to_string(&file_path).expect("Should have been able to read the file");
 
-    dbg!(eridani::parse(
-        &contents,
-        Some(&args.file_path),
-        &entry_point
-    ));
+    dbg!(eridani::parse(&contents, file_path.to_str(), &entry_point));
 }

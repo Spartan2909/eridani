@@ -1,0 +1,8 @@
+module fib
+use fibonacci in fib
+
+unused is
+    () unused()
+
+main is
+    () print(fibonacci(5))
