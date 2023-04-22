@@ -286,13 +286,7 @@ impl Pattern {
                     ArithOp::Mul => value * mid,
                     ArithOp::Div => value / mid,
                     ArithOp::Mod => value % mid,
-                };
-
-                let value = if let Some(value) = value {
-                    value
-                } else {
-                    return None;
-                };
+                }?;
 
                 let matches = comparison.compare(&value, rhs);
 

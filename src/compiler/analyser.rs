@@ -63,6 +63,8 @@ impl Function {
     }
 }
 
+pub type Program = (Rc<RefCell<Function>>, Vec<Rc<RefCell<Function>>>);
+
 #[derive(Debug, Clone)]
 pub struct Method {
     args: Vec<(Option<String>, Pattern)>,

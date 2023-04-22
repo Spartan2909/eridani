@@ -10,6 +10,12 @@ use crate::prelude::*;
 
 impl From<Token> for Value {
     fn from(value: Token) -> Self {
+        (&value).into()
+    }
+}
+
+impl From<&Token> for Value {
+    fn from(value: &Token) -> Self {
         match value.kind() {
             TokenType::Number => Value::Number(
                 value

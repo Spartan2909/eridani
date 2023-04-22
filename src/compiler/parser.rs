@@ -13,8 +13,12 @@ pub struct ParseTree {
 }
 
 impl ParseTree {
-    pub fn imports(&self) -> &[ImportTree] {
+    pub fn imports(&self) -> &Vec<ImportTree> {
         &self.imports
+    }
+
+    pub fn functions(&self) -> &Vec<Function> {
+        &self.functions
     }
 }
 
@@ -25,12 +29,12 @@ pub struct Function {
 }
 
 impl Function {
-    pub fn line(&self) -> usize {
-        if let Some(method) = self.methods.last() {
-            method.line()
-        } else {
-            self.name.line()
-        }
+    pub fn name(&self) -> &Token {
+        &self.name
+    }
+
+    pub fn methods(&self) -> &Vec<Method> {
+        &self.methods
     }
 }
 
@@ -41,10 +45,6 @@ pub struct Method {
 }
 
 impl Method {
-    pub fn line(&self) -> usize {
-        self.body.line()
-    }
-
     pub fn args(&self) -> &Vec<NamedPattern> {
         &self.args
     }
@@ -171,7 +171,7 @@ impl Expr {
             Expr::Let { value, .. } => value.line(),
             Expr::List { end, .. } => end.line(),
             Expr::Literal(token) => token.line(),
-            Expr::Method(method) => method.line(),
+            Expr::Method(method) => method.body.line(),
             Expr::Unary { right, .. } => right.line(),
             Expr::Variable(tree) => tree.line(),
         }

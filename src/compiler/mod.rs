@@ -77,13 +77,10 @@ impl Error {
 pub type Result<T> = result::Result<T, Error>;
 
 #[cfg(feature = "tree_walk")]
-pub use analyser::Function;
+pub use analyser::{Function, Program};
 
 #[cfg(feature = "tree_walk")]
-pub fn parse(
-    source: &str,
-    entry_point: &str,
-) -> Result<(Rc<RefCell<Function>>, Vec<Rc<RefCell<Function>>>)> {
+pub fn parse(source: &str, entry_point: &str) -> Result<Program> {
     let tokens = scanner::scan(source)?;
     let parse_tree = parser::parse(tokens)?;
     analyser::analyse(parse_tree, entry_point)
