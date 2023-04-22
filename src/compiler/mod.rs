@@ -12,9 +12,21 @@ pub(crate) mod analyser;
 pub(crate) mod parser;
 pub(crate) mod scanner;
 
+#[cfg(debug_assertions)]
 macro_rules! internal_error {
+    ( $str:expr ) => {
+        panic!(concat!("internal compiler error: ", $str))
+    };
+
     ( $str:expr, $( $arg:expr )* ) => {
         panic!(concat!("internal compiler error: ", $str), $( $arg )*)
+    };
+}
+
+#[cfg(not(debug_assertions))]
+macro_rules! internal_error {
+    ( $( $tokens:tt )* ) => {
+        panic!("internal compiler error")
     };
 }
 
