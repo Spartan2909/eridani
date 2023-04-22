@@ -1,4 +1,4 @@
-use core::{cell::RefCell, fmt, result};
+use core::{fmt, result};
 
 #[cfg(feature = "no_std")]
 use core::error;
@@ -7,8 +7,6 @@ use core::error;
 use std::error;
 
 use crate::prelude::*;
-
-use alloc::rc::Rc;
 
 pub(crate) mod analyser;
 pub(crate) mod parser;
@@ -44,13 +42,7 @@ impl fmt::Display for Error {
                 kind,
                 location,
                 message,
-            } => {
-                if *line == usize::MAX {
-                    write!(f, "[line <native>] {} Error{}: {}", kind, location, message)
-                } else {
-                    write!(f, "[line {}] {} Error{}: {}", line, kind, location, message)
-                }
-            }
+            } => write!(f, "[line {}] {} Error{}: {}", line, kind, location, message),
         }
     }
 }

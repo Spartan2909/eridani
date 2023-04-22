@@ -105,22 +105,6 @@ pub enum Pattern {
     Wildcard(Token),
 }
 
-impl Pattern {
-    pub fn line(&self) -> usize {
-        match self {
-            Pattern::Binary { right, .. } => right.line(),
-            Pattern::Comparision { rhs, .. } => rhs.line(),
-            Pattern::List { right, .. } => right.line(),
-            Pattern::Literal(token) => token.line(),
-            Pattern::OperatorComparison { rhs, .. } => rhs.line(),
-            Pattern::Range { upper, .. } => upper.line(),
-            Pattern::Type(token) => token.line(),
-            Pattern::Unary { right, .. } => right.line(),
-            Pattern::Wildcard(label) => label.line(),
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub enum Expr {
     Binary {
@@ -153,29 +137,6 @@ pub enum Expr {
         right: Box<Self>,
     },
     Variable(ImportTree),
-}
-
-impl Expr {
-    pub fn line(&self) -> usize {
-        match self {
-            Expr::Binary { right, .. } => right.line(),
-            Expr::Block { body, end } => {
-                if let Some(expr) = body.last() {
-                    expr.line()
-                } else {
-                    end.line()
-                }
-            }
-            Expr::Call { paren, .. } => paren.line(),
-            Expr::Grouping(expr) => expr.line(),
-            Expr::Let { value, .. } => value.line(),
-            Expr::List { end, .. } => end.line(),
-            Expr::Literal(token) => token.line(),
-            Expr::Method(method) => method.body.line(),
-            Expr::Unary { right, .. } => right.line(),
-            Expr::Variable(tree) => tree.line(),
-        }
-    }
 }
 
 #[derive(Debug, Clone)]

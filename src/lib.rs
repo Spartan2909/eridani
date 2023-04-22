@@ -1,5 +1,11 @@
 #![feature(let_chains, try_blocks)]
 #![cfg_attr(feature = "no_std", no_std, feature(core_intrinsics, error_in_core))]
+#![warn(
+    clippy::cast_lossless,
+    clippy::dbg_macro,
+    clippy::std_instead_of_core,
+    clippy::std_instead_of_core
+)]
 
 #[cfg(not(any(feature = "compiler", feature = "runtime")))]
 compile_error!("Either feature 'compiler' or feature 'runtime' must be enabled.");
