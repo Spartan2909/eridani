@@ -254,7 +254,7 @@ impl Parser {
     }
 
     fn is_at_end(&self) -> bool {
-        self.peek(0).optional_kind() == Some(TokenType::Eof)
+        self.check_ignore_newlines(TokenType::Eof)
     }
 
     fn advance(&mut self) -> &Token {
@@ -350,6 +350,8 @@ impl Parser {
             if let Err(err) = result {
                 errors.push(err);
                 self.synchronise();
+            } else {
+                self.skip_newlines();
             }
         }
 

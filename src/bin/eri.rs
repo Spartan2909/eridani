@@ -32,5 +32,5 @@ fn main() {
     let contents =
         fs::read_to_string(args.file_path).expect("Should have been able to read the file");
 
-    dbg!(eridani::compiler::parse(&contents, &entry_point));
+    dbg!(eridani::parse(&contents, &entry_point));
 }

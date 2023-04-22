@@ -21,7 +21,13 @@ mod prelude {
 mod common;
 
 #[cfg(feature = "compiler")]
-pub mod compiler;
+mod compiler;
+
+#[cfg(feature = "compiler")]
+pub use compiler::compile;
+
+#[cfg(feature = "tree_walk")]
+pub use compiler::{Function, parse};
 
 #[cfg(feature = "runtime")]
 mod runtime;
