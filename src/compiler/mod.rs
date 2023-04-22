@@ -84,16 +84,16 @@ pub type Result<T> = result::Result<T, Error>;
 pub use analyser::{Function, Program};
 
 #[cfg(feature = "tree_walk")]
-pub fn parse(source: &str, entry_point: &str) -> Result<Program> {
+pub fn parse(source: &str, source_origin: Option<&str>, entry_point: &str) -> Result<Program> {
     let tokens = scanner::scan(source)?;
     let parse_tree = parser::parse(tokens)?;
-    analyser::analyse(parse_tree, entry_point)
+    analyser::analyse(parse_tree, source_origin, entry_point)
 }
 
-pub fn compile(source: &str, entry_point: &str) -> Result<()> {
+pub fn compile(source: &str, source_origin: Option<&str>, entry_point: &str) -> Result<()> {
     let tokens = scanner::scan(source)?;
     let parse_tree = parser::parse(tokens)?;
-    let _analysed = analyser::analyse(parse_tree, entry_point)?;
+    let _analysed = analyser::analyse(parse_tree, source_origin, entry_point)?;
 
     Ok(())
 }

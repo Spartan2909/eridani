@@ -12,7 +12,10 @@ use crate::{
     prelude::*,
 };
 
-use alloc::{collections::BTreeMap, rc::Rc};
+use alloc::{
+    collections::BTreeMap,
+    rc::{Rc, Weak},
+};
 use core::{cell::RefCell, fmt::Debug, iter};
 
 pub enum Function {
@@ -343,6 +346,7 @@ struct Module {
     functions: Vec<Rc<RefCell<Function>>>,
     function_names: Vec<String>,
     bindings: BTreeMap<String, Binding>,
+    supermodule: Weak<RefCell<Module>>,
 }
 
 impl Module {
@@ -353,6 +357,7 @@ impl Module {
             functions: vec![],
             function_names: vec![],
             bindings: BTreeMap::new(),
+            supermodule: Weak::new(),
         }
     }
 
@@ -385,24 +390,34 @@ impl Module {
 
         None
     }
-
-    fn functions(&self) -> Vec<Rc<RefCell<Function>>> {
-        let mut functions = self.functions.clone();
-        for module in &self.submodules {
-            functions.extend(module.borrow().functions());
-        }
-
-        functions
-    }
 }
 
-fn find_module(name: &str, line: usize) -> Result<String> {
+/// Returns the module, and the path to the file containing that code, if it exists
+fn find_module(
+    name: &str,
+    _modules: &mut Vec<Rc<RefCell<Module>>>,
+    line: usize,
+) -> Result<Rc<RefCell<Module>>> {
     let location = format!(" at {name}");
     Err(Error::new(
         line,
         "Import",
         &location,
-        "Cannot resolve module name",
+        "Cannot resolve module",
+    ))
+}
+
+fn find_submodule(
+    name: &str,
+    line: usize,
+    _supermodule_origin: Option<&str>,
+) -> Result<(String, String)> {
+    let location = format!(" at {name}");
+    Err(Error::new(
+        line,
+        "Import",
+        &location,
+        "Cannot resolve submodule",
     ))
 }
 
@@ -415,27 +430,43 @@ fn resolve_import(
         let tmp: &ImportTree = next;
         import = tmp.clone();
 
-        binding = import_module
-            .borrow()
-            .find(import.name().lexeme())
-            .unwrap_or(Err(Error::new(
-                import.line(),
-                "Import",
-                &format!(" at '{}'", import.name().lexeme()),
-                "No such item",
-            ))?);
-
-        if import.next().is_some() {
-            if let Binding::Module(module) = &binding {
-                import_module = Rc::clone(module);
-            } else if let Binding::Function(_) = &binding {
-                let location = format!(" at {}", import.name().lexeme());
-                return Err(Error::new(
+        if import.name().kind() == TokenType::Super {
+            let supermodule =
+                import_module
+                    .borrow()
+                    .supermodule
+                    .upgrade()
+                    .unwrap_or(Err(Error::new(
+                        import.line(),
+                        "Import",
+                        "",
+                        "'super' used in top-level module",
+                    ))?);
+            binding = Binding::Module(Rc::clone(&supermodule));
+            import_module = supermodule;
+        } else {
+            binding = import_module
+                .borrow()
+                .find(import.name().lexeme())
+                .unwrap_or(Err(Error::new(
                     import.line(),
                     "Import",
-                    &location,
-                    "Cannot import from function",
-                ));
+                    &format!(" at '{}'", import.name().lexeme()),
+                    "No such item",
+                ))?);
+
+            if import.next().is_some() {
+                if let Binding::Module(module) = &binding {
+                    import_module = Rc::clone(module);
+                } else if let Binding::Function(_) = &binding {
+                    let location = format!(" at {}", import.name().lexeme());
+                    return Err(Error::new(
+                        import.line(),
+                        "Import",
+                        &location,
+                        "Cannot import from function",
+                    ));
+                }
             }
         }
     }
@@ -443,9 +474,19 @@ fn resolve_import(
     Ok(binding)
 }
 
-pub fn analyse(parse_tree: ParseTree, entry_point: &str) -> Result<Program> {
+pub fn analyse(
+    parse_tree: ParseTree,
+    source_origin: Option<&str>,
+    entry_point: &str,
+) -> Result<Program> {
     let root_module = Rc::new(RefCell::new(Module::new("")));
-    analyse_module(parse_tree, Rc::clone(&root_module))?;
+    let mut modules = vec![Rc::clone(&root_module)];
+    analyse_module(
+        parse_tree,
+        source_origin,
+        Rc::clone(&root_module),
+        &mut modules,
+    )?;
 
     let entry_point = match root_module.borrow().find_function(entry_point) {
         Some(entry_point) => entry_point,
@@ -455,7 +496,10 @@ pub fn analyse(parse_tree: ParseTree, entry_point: &str) -> Result<Program> {
         }
     };
 
-    let mut functions = root_module.borrow().functions();
+    let mut functions = vec![];
+    for module in modules {
+        functions.append(&mut module.borrow_mut().functions)
+    }
 
     let mut calls = vec![];
     for function in &functions {
@@ -484,19 +528,39 @@ pub fn analyse(parse_tree: ParseTree, entry_point: &str) -> Result<Program> {
     Ok((entry_point, functions))
 }
 
-fn analyse_module(parse_tree: ParseTree, module: Rc<RefCell<Module>>) -> Result<()> {
-    for import in parse_tree.imports() {
-        let module_parse_tree = parser::parse(scanner::scan(&find_module(
-            import.name().lexeme(),
-            import.line(),
-        )?)?)?;
-        let submodule = Rc::new(RefCell::new(Module::new(import.name().lexeme())));
+fn analyse_module(
+    parse_tree: ParseTree,
+    source_origin: Option<&str>,
+    module: Rc<RefCell<Module>>,
+    modules: &mut Vec<Rc<RefCell<Module>>>,
+) -> Result<()> {
+    dbg!(&parse_tree);
+    for module_name in parse_tree.modules() {
+        let (submodule, submodule_origin) =
+            find_submodule(module_name.lexeme(), module_name.line(), source_origin)?;
+        let submodule_parse_tree = parser::parse(scanner::scan(&submodule)?)?;
+        let submodule = Rc::new(RefCell::new(Module::new(module_name.lexeme())));
+        modules.push(Rc::clone(&submodule));
         module.borrow_mut().submodules.push(Rc::clone(&submodule));
-        analyse_module(module_parse_tree, Rc::clone(&submodule))?;
+        module.borrow_mut().bindings.insert(
+            module_name.lexeme().to_string(),
+            Binding::Module(Rc::clone(&submodule)),
+        );
+        analyse_module(
+            submodule_parse_tree,
+            Some(&submodule_origin),
+            Rc::clone(&submodule),
+            modules,
+        )?;
+    }
 
-        let binding = resolve_import(import.clone(), Rc::clone(&submodule))?;
+    for import in parse_tree.imports() {
+        let imported_module = find_module(import.name().lexeme(), modules, import.line())?;
+        modules.push(Rc::clone(&imported_module));
 
-        submodule
+        let binding = resolve_import(import.clone(), Rc::clone(&imported_module))?;
+
+        imported_module
             .borrow_mut()
             .bindings
             .insert(import.name().lexeme().to_string(), binding);

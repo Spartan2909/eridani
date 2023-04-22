@@ -8,11 +8,16 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub struct ParseTree {
+    modules: Vec<Token>,
     imports: Vec<ImportTree>,
     functions: Vec<Function>,
 }
 
 impl ParseTree {
+    pub fn modules(&self) -> &Vec<Token> {
+        &self.modules
+    }
+
     pub fn imports(&self) -> &Vec<ImportTree> {
         &self.imports
     }
@@ -295,6 +300,7 @@ impl Parser {
     }
 
     fn parse(&mut self) -> Result<ParseTree> {
+        let mut modules = vec![];
         let mut imports = vec![];
         let mut functions = vec![];
         let mut errors = vec![];
@@ -303,6 +309,10 @@ impl Parser {
             let result: Result<()> = try {
                 if self.match_token(TokenType::Use, true) {
                     imports.push(self.import("Expect function or module name after 'use'")?);
+                } else if self.match_token(TokenType::Module, true) {
+                    modules.push(
+                        self.consume(TokenType::Identifier, "Expect identifier after 'module'")?,
+                    );
                 } else {
                     functions.push(self.function()?);
                 }
@@ -317,7 +327,11 @@ impl Parser {
         }
 
         if errors.is_empty() {
-            Ok(ParseTree { imports, functions })
+            Ok(ParseTree {
+                modules,
+                imports,
+                functions,
+            })
         } else if errors.len() == 1 {
             Err(errors[0].clone())
         } else {
@@ -330,14 +344,28 @@ impl Parser {
 
         let mut imports = vec![name];
         while self.match_token(TokenType::In, true) {
-            imports.push(self.consume(TokenType::Identifier, "Expect module name after 'in'")?);
+            imports.push(self.consume_any(
+                vec![TokenType::Identifier, TokenType::Super],
+                "Expect module name after 'in'",
+            )?);
         }
         imports.reverse();
         let mut tree = ImportTree {
             name: imports[0].clone(),
             next: None,
         };
+        let mut non_super_reached = false;
         for import in &imports[1..] {
+            if import.kind() == TokenType::Identifier {
+                non_super_reached = true;
+            } else if non_super_reached {
+                return Err(Error::new(
+                    import.line(),
+                    "Import",
+                    " at 'super'",
+                    "Cannot use 'super' before name",
+                ));
+            }
             tree.push(import.clone())
         }
 
@@ -652,7 +680,7 @@ impl Parser {
     }
 
     fn method_expr(&mut self) -> Result<Expr> {
-        if self.match_token(TokenType::Method, true) {
+        if self.match_token(TokenType::Lambda, true) {
             let method = Box::new(self.method()?);
             Ok(Expr::Method(method))
         } else {

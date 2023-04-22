@@ -30,7 +30,11 @@ fn main() {
     };
 
     let contents =
-        fs::read_to_string(args.file_path).expect("Should have been able to read the file");
+        fs::read_to_string(args.file_path.clone()).expect("Should have been able to read the file");
 
-    dbg!(eridani::parse(&contents, &entry_point));
+    dbg!(eridani::parse(
+        &contents,
+        Some(&args.file_path),
+        &entry_point
+    ));
 }
