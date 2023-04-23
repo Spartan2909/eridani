@@ -8,11 +8,11 @@ default-run = "eri"
 clap = { version = "4.1", features = ["derive"], optional = true }
 
 [features]
-default = ["compiler", "runtime"]
+default = ["compiler", "runtime", "std"]
 compiler = []
 runtime = []
 web = ["runtime"]
-no_std = []
+std = []
 tree_walk = ["compiler", "runtime"]
 bin = ["dep:clap", "tree_walk"]   # REMOVE DEPENDENCY ON TREE_WALK ONCE BYTECODE VM IS FINISHED
 

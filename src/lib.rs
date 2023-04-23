@@ -1,5 +1,5 @@
 #![feature(fs_try_exists, let_chains, try_blocks)]
-#![cfg_attr(feature = "no_std", no_std, feature(error_in_core))]
+#![cfg_attr(not(feature = "std"), no_std, feature(error_in_core))]
 #![warn(
     clippy::cast_lossless,
     clippy::dbg_macro,

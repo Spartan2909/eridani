@@ -1,9 +1,9 @@
 use core::{fmt, result};
 
-#[cfg(feature = "no_std")]
+#[cfg(not(feature = "std"))]
 use core::error;
 
-#[cfg(not(feature = "no_std"))]
+#[cfg(feature = "std")]
 use std::error;
 
 use crate::prelude::*;
