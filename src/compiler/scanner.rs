@@ -202,8 +202,8 @@ impl Scanner {
             'd' => self.check_keyword(1, "o", TokenType::Do),
             'e' => self.check_keyword(1, "nd", TokenType::End),
             'i' => match self.nth_char(self.start + 1) {
-                'n' => TokenType::In,
-                's' => TokenType::Is,
+                'n' => self.check_keyword(2, "", TokenType::In),
+                's' => self.check_keyword(2, "", TokenType::Is),
                 _ => TokenType::Identifier,
             },
             'l' => match self.nth_char(self.start + 1) {
