@@ -782,11 +782,11 @@ fn convert_expr(
 fn convert_exprs(
     values: &[parser::Expr],
     module: &Rc<RefCell<Module>>,
-    bindings: &Vec<String>,
+    bindings: &[String],
 ) -> Result<Vec<Expr>> {
     let mut result = vec![];
     let mut expr;
-    let mut inner_bindings = bindings.clone();
+    let mut inner_bindings = bindings.to_owned();
     for value in values {
         (expr, inner_bindings) = convert_expr(value, Rc::clone(module), inner_bindings)?;
         result.push(expr);
