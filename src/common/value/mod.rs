@@ -3,12 +3,13 @@ use crate::prelude::*;
 use alloc::collections::BTreeMap;
 use core::{
     cmp::Ordering,
+    fmt,
     ops::{Add, Div, Mul, Rem, Sub},
 };
 
 #[derive(Debug, Clone)]
 pub enum Value {
-    List(Box<List>),
+    List(Vec<Value>),
     Nothing,
     Number(f64),
     String(String),
@@ -70,6 +71,26 @@ impl Rem for Value {
     }
 }
 
+impl fmt::Display for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Value::List(l) => {
+                write!(f, "[")?;
+                for value in l {
+                    write!(f, "{value}")?;
+                    if Some(value) != l.last() {
+                        write!(f, ", ")?;
+                    }
+                }
+                write!(f, "]")
+            }
+            Value::Nothing => write!(f, "nothing"),
+            Value::Number(n) => write!(f, "{n}"),
+            Value::String(s) => write!(f, "\"{s}\""),
+        }
+    }
+}
+
 impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
@@ -102,36 +123,6 @@ impl Value {
             (Value::Number(_), Type::Number) => true,
             (Value::String(_), Type::String) => true,
             _ => false,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct List {
-    head: Value,
-    next: Option<Box<List>>,
-}
-
-impl PartialEq for List {
-    fn eq(&self, other: &Self) -> bool {
-        if self.head != other.head {
-            return false;
-        }
-
-        match (&self.next, &other.next) {
-            (Some(l1), Some(l2)) => l1 == l2,
-            (None, None) => true,
-            _ => false,
-        }
-    }
-}
-
-impl PartialOrd for List {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        if self == other {
-            Some(Ordering::Equal)
-        } else {
-            None
         }
     }
 }
@@ -255,8 +246,8 @@ impl Pattern {
             Pattern::List { left, right } => {
                 if let Value::List(list) = value {
                     let mut new_bindings = left.matches(value, bindings)?;
-                    let tail = match &list.next {
-                        Some(next) => Value::List((*next).clone()),
+                    let tail = match list.get(1) {
+                        Some(_) => Value::List(list[1..].to_vec()),
                         None => Value::Nothing,
                     };
                     new_bindings.extend(right.matches(&tail, bindings)?);
