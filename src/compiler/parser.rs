@@ -8,13 +8,13 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub struct ParseTree {
-    modules: Vec<Token>,
+    modules: Vec<(Option<Token>, Token)>,
     imports: Vec<ImportTree>,
     functions: Vec<Function>,
 }
 
 impl ParseTree {
-    pub fn modules(&self) -> &Vec<Token> {
+    pub fn modules(&self) -> &Vec<(Option<Token>, Token)> {
         &self.modules
     }
 
@@ -220,7 +220,7 @@ impl Parser {
     }
 
     fn is_at_end(&self) -> bool {
-        self.check_ignore_newlines(TokenType::Eof)
+        self.check_ignore_newlines(TokenType::Eof, 0)
     }
 
     fn advance(&mut self) -> &Token {
@@ -235,8 +235,7 @@ impl Parser {
         self.peek(offset).optional_kind() == Some(kind)
     }
 
-    fn check_ignore_newlines(&self, kind: TokenType) -> bool {
-        let mut offset = 0;
+    fn check_ignore_newlines(&self, kind: TokenType, mut offset: usize) -> bool {
         while self.check_token(TokenType::Newline, offset) {
             offset += 1;
         }
@@ -309,10 +308,13 @@ impl Parser {
             let result: Result<()> = try {
                 if self.match_token(TokenType::Use, true) {
                     imports.push(self.import("Expect function or module name after 'use'")?);
-                } else if self.match_token(TokenType::Module, true) {
-                    modules.push(
-                        self.consume(TokenType::Identifier, "Expect identifier after 'module'")?,
-                    );
+                } else if self.check_ignore_newlines(TokenType::Module, 0)
+                    || self.check_ignore_newlines(TokenType::Module, 1)
+                {
+                    let public = self.consume(TokenType::Public, "").ok();
+                    let module_name =
+                        self.consume(TokenType::Identifier, "Expect identifier after 'module'")?;
+                    modules.push((public, module_name));
                 } else {
                     functions.push(self.function()?);
                 }
@@ -739,7 +741,7 @@ impl Parser {
             Ok(Expr::Grouping(Box::new(expr)))
         } else if self.match_token(TokenType::Do, true) {
             let mut body = vec![];
-            while !self.check_ignore_newlines(TokenType::End) && !self.is_at_end() {
+            while !self.check_ignore_newlines(TokenType::End, 0) && !self.is_at_end() {
                 self.skip_newlines();
                 body.push(self.expression()?);
                 self.skip_newlines();

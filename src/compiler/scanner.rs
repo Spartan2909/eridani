@@ -51,6 +51,7 @@ pub enum TokenType {
     Let,
     Module,
     Nothing,
+    Public,
     Super,
     Use,
 
@@ -212,6 +213,7 @@ impl Scanner {
             },
             'm' => self.check_keyword(1, "odule", TokenType::Module),
             'n' => self.check_keyword(1, "othing", TokenType::Nothing),
+            'p' => self.check_keyword(1, "ublic", TokenType::Public),
             's' => self.check_keyword(1, "uper", TokenType::Super),
             'u' => self.check_keyword(1, "se", TokenType::Use),
             'I' => self.check_keyword(1, "nteger", TokenType::Type),

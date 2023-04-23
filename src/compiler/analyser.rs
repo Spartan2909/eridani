@@ -230,20 +230,21 @@ impl Expr {
                 if placeholder.next().is_some() {
                     unreachable!("currently no way to create a placeholder from an import tree");
                 } else {
-                    let function = if let Some(function) = module
-                        .borrow()
-                        .find_function(placeholder.name().lexeme()) {
-                            function
-                        } else if let Some(binding) = module.borrow().bindings.get(placeholder.name().lexeme()) {
-                            if let Binding::Function(f) = binding {
-                                f.clone()
-                            } else {
-                                internal_error!("placeholder pointing to module")
-                            }
+                    let function = if let Some(function) =
+                        module.borrow().find_function(placeholder.name().lexeme())
+                    {
+                        function
+                    } else if let Some(binding) =
+                        module.borrow().bindings.get(placeholder.name().lexeme())
+                    {
+                        if let Binding::Function(f) = binding {
+                            f.clone()
                         } else {
-                            internal_error!("dangling placeholder")
-                        };
-                        
+                            internal_error!("placeholder pointing to module")
+                        }
+                    } else {
+                        internal_error!("dangling placeholder")
+                    };
 
                     *self = Self::Function(function);
                 }
@@ -319,7 +320,7 @@ impl Binding {
 #[derive(Debug)]
 struct Module {
     name: String,
-    submodules: Vec<Rc<RefCell<Module>>>,
+    submodules: Vec<(Rc<RefCell<Module>>, bool)>,
     functions: Vec<Rc<RefCell<Function>>>,
     function_names: Vec<String>,
     bindings: BTreeMap<String, Binding>,
@@ -338,8 +339,8 @@ impl Module {
         }
     }
 
-    fn find(&self, name: &str) -> Option<Binding> {
-        if let Some(module) = self.find_module(name) {
+    fn find(&self, name: &str, looking_from_module_tree: bool) -> Option<Binding> {
+        if let Some(module) = self.find_module(name, looking_from_module_tree) {
             Some(Binding::Module(module))
         } else if let Some(function) = self.find_function(name) {
             Some(Binding::Function(function))
@@ -348,9 +349,13 @@ impl Module {
         }
     }
 
-    fn find_module(&self, name: &str) -> Option<Rc<RefCell<Module>>> {
-        for submodule in &self.submodules {
-            if submodule.borrow().name == name {
+    fn find_module(
+        &self,
+        name: &str,
+        looking_from_module_tree: bool,
+    ) -> Option<Rc<RefCell<Module>>> {
+        for (submodule, public) in &self.submodules {
+            if submodule.borrow().name == name && (looking_from_module_tree || *public) {
                 return Some(Rc::clone(submodule));
             }
         }
@@ -373,11 +378,11 @@ impl Module {
 fn resolve_module(
     name: &str,
     importing_module: Rc<RefCell<Module>>,
-    _modules: &mut Vec<Rc<RefCell<Module>>>,
+    _modules: &mut [Rc<RefCell<Module>>],
     line: usize,
-) -> Result<Rc<RefCell<Module>>> {
-    if let Some(module) = importing_module.borrow().find_module(name) {
-        return Ok(module);
+) -> Result<(Rc<RefCell<Module>>, bool)> {
+    if let Some(module) = importing_module.borrow().find_module(name, true) {
+        return Ok((module, true));
     }
 
     let location = format!(" at {name}");
@@ -436,6 +441,7 @@ fn resolve_submodule(
 fn resolve_import(
     mut import: ImportTree,
     mut import_module: Rc<RefCell<Module>>,
+    looking_from_module_tree: bool,
 ) -> Result<Binding> {
     let mut binding = Binding::Module(Rc::clone(&import_module));
     while let Some(next) = import.next() {
@@ -457,7 +463,10 @@ fn resolve_import(
             binding = Binding::Module(Rc::clone(&supermodule));
             import_module = supermodule;
         } else {
-            binding = match import_module.borrow().find(import.name().lexeme()) {
+            binding = match import_module
+                .borrow()
+                .find(import.name().lexeme(), looking_from_module_tree)
+            {
                 Some(binding) => binding,
                 None => {
                     return Err(Error::new(
@@ -548,13 +557,17 @@ fn analyse_module(
     module: Rc<RefCell<Module>>,
     modules: &mut Vec<Rc<RefCell<Module>>>,
 ) -> Result<()> {
-    for module_name in parse_tree.modules() {
+    for (public, module_name) in parse_tree.modules() {
+        let public = public.is_some();
         let (submodule, submodule_origin) =
             resolve_submodule(module_name.lexeme(), module_name.line(), source_origin)?;
         let submodule_parse_tree = parser::parse(scanner::scan(&submodule)?)?;
         let submodule = Rc::new(RefCell::new(Module::new(module_name.lexeme())));
         modules.push(Rc::clone(&submodule));
-        module.borrow_mut().submodules.push(Rc::clone(&submodule));
+        module
+            .borrow_mut()
+            .submodules
+            .push((Rc::clone(&submodule), public));
         module.borrow_mut().bindings.insert(
             module_name.lexeme().to_string(),
             Binding::Module(Rc::clone(&submodule)),
@@ -568,7 +581,7 @@ fn analyse_module(
     }
 
     for import in parse_tree.imports() {
-        let imported_module = resolve_module(
+        let (imported_module, in_module_tree) = resolve_module(
             import.name().lexeme(),
             Rc::clone(&module),
             modules,
@@ -576,7 +589,7 @@ fn analyse_module(
         )?;
         modules.push(Rc::clone(&imported_module));
 
-        let binding = resolve_import(import.clone(), Rc::clone(&imported_module))?;
+        let binding = resolve_import(import.clone(), Rc::clone(&imported_module), in_module_tree)?;
 
         module.borrow_mut().bindings.insert(binding.name(), binding);
     }
@@ -599,7 +612,7 @@ fn analyse_module(
                 args.push((arg.name(), arg.pattern().into()))
             }
 
-            let (body, _) = convert_expr(method.body(), Rc::clone(&module), vec![])?;
+            let (body, _) = convert_expr(method.body(), Rc::clone(&module), vec![], modules)?;
 
             methods.push(RefCell::new(Method { args, body }));
         }
@@ -621,6 +634,7 @@ fn convert_expr(
     expr: &parser::Expr,
     module: Rc<RefCell<Module>>,
     bindings: Vec<String>,
+    modules: &mut [Rc<RefCell<Module>>],
 ) -> Result<(Expr, Vec<String>)> {
     use parser::Expr as ParseExpr;
 
@@ -639,8 +653,8 @@ fn convert_expr(
                 _ => internal_error!("parsed token '{:?}' as operator", operator),
             };
 
-            let (left, bindings) = convert_expr(left, Rc::clone(&module), bindings)?;
-            let (right, bindings) = convert_expr(right, module, bindings)?;
+            let (left, bindings) = convert_expr(left, Rc::clone(&module), bindings, modules)?;
+            let (right, bindings) = convert_expr(right, module, bindings, modules)?;
 
             (
                 Expr::Binary {
@@ -652,7 +666,7 @@ fn convert_expr(
             )
         }
         ParseExpr::Block { body, end } => {
-            let body = convert_exprs(body, &module, &bindings)?;
+            let body = convert_exprs(body, &module, &bindings, modules)?;
             (
                 Expr::Block {
                     body,
@@ -666,8 +680,8 @@ fn convert_expr(
             paren,
             arguments,
         } => {
-            let (callee, bindings) = convert_expr(callee, Rc::clone(&module), bindings)?;
-            let arguments = convert_exprs(arguments, &module, &bindings)?;
+            let (callee, bindings) = convert_expr(callee, Rc::clone(&module), bindings, modules)?;
+            let arguments = convert_exprs(arguments, &module, &bindings, modules)?;
             (
                 Expr::Call {
                     callee: Box::new(callee),
@@ -678,11 +692,11 @@ fn convert_expr(
             )
         }
         ParseExpr::Grouping(expr) => {
-            let (expr, bindings) = convert_expr(expr, Rc::clone(&module), bindings)?;
+            let (expr, bindings) = convert_expr(expr, Rc::clone(&module), bindings, modules)?;
             (Expr::Grouping(Box::new(expr)), bindings)
         }
         ParseExpr::Let { pattern, value } => {
-            let (value, bindings) = convert_expr(value, module, bindings)?;
+            let (value, bindings) = convert_expr(value, module, bindings, modules)?;
             (
                 Expr::Let {
                     pattern: pattern.into(),
@@ -693,7 +707,7 @@ fn convert_expr(
         }
         ParseExpr::List { expressions, end } => (
             Expr::List {
-                expressions: convert_exprs(expressions, &module, &bindings)?,
+                expressions: convert_exprs(expressions, &module, &bindings, modules)?,
                 line: end.line(),
             },
             bindings,
@@ -714,7 +728,7 @@ fn convert_expr(
                 .iter()
                 .map(|x| (x.name(), x.pattern().into()))
                 .collect();
-            let (body, _) = convert_expr(method.body(), module, bindings.clone())?;
+            let (body, _) = convert_expr(method.body(), module, bindings.clone(), modules)?;
             (Expr::Method(Box::new(Method { args, body })), bindings)
         }
         ParseExpr::Unary { operator, right } => {
@@ -723,7 +737,7 @@ fn convert_expr(
                 _ => internal_error!("parsed token {:?} as unary", operator),
             };
 
-            let (right, bindings) = convert_expr(right, module, bindings)?;
+            let (right, bindings) = convert_expr(right, module, bindings, modules)?;
 
             (
                 Expr::Unary {
@@ -736,7 +750,9 @@ fn convert_expr(
         ParseExpr::Variable(var) => {
             let mut bindings = bindings;
             let expr = if var.next().is_some() {
-                let item = resolve_import(var.clone(), module)?;
+                let (import_module, looking_from_module_tree) =
+                    resolve_module(var.name().lexeme(), module, modules, var.name().line())?;
+                let item = resolve_import(var.clone(), import_module, looking_from_module_tree)?;
 
                 let function = match item {
                     Binding::Function(f) => f,
@@ -783,12 +799,13 @@ fn convert_exprs(
     values: &[parser::Expr],
     module: &Rc<RefCell<Module>>,
     bindings: &[String],
+    modules: &mut [Rc<RefCell<Module>>],
 ) -> Result<Vec<Expr>> {
     let mut result = vec![];
     let mut expr;
     let mut inner_bindings = bindings.to_owned();
     for value in values {
-        (expr, inner_bindings) = convert_expr(value, Rc::clone(module), inner_bindings)?;
+        (expr, inner_bindings) = convert_expr(value, Rc::clone(module), inner_bindings, modules)?;
         result.push(expr);
     }
     Ok(result)
