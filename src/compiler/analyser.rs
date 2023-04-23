@@ -374,10 +374,8 @@ impl Module {
     fn find(&self, name: &str, looking_from_module_tree: bool) -> Option<Binding> {
         if let Some(module) = self.find_module(name, looking_from_module_tree) {
             Some(Binding::Module(module))
-        } else if let Some(function) = self.find_function(name) {
-            Some(Binding::Function(function))
         } else {
-            None
+            self.find_function(name).map(Binding::Function)
         }
     }
 
@@ -572,7 +570,7 @@ fn get_std() -> Result<(Vec<Rc<RefCell<Module>>>, BTreeMap<String, Binding>)> {
         if prelude.contains(&function.borrow().name()) {
             bindings.insert(
                 function.borrow().name().to_string(),
-                Binding::Function(Rc::clone(&function)),
+                Binding::Function(Rc::clone(function)),
             );
         }
     }

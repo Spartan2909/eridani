@@ -26,7 +26,7 @@ impl From<Option<Value>> for Value {
 
 impl From<Option<&Value>> for Value {
     fn from(value: Option<&Value>) -> Self {
-        value.map(|value| value.clone()).into()
+        value.cloned().into()
     }
 }
 
