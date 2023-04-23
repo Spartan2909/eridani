@@ -312,6 +312,7 @@ impl Parser {
                     || self.check_ignore_newlines(TokenType::Module, 1)
                 {
                     let public = self.consume(TokenType::Public, "").ok();
+                    self.consume(TokenType::Module, "Expect 'module'")?;
                     let module_name =
                         self.consume(TokenType::Identifier, "Expect identifier after 'module'")?;
                     modules.push((public, module_name));
