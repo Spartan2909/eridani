@@ -57,5 +57,7 @@ mod feature_web {}
 #[cfg(not(feature = "web"))]
 mod feature_web {}
 
-pub const NATIVES: [(&str, fn(&[Value]) -> Result<Value, ArgumentError>); 2] =
+type NativeFunction = fn(&[Value]) -> Result<Value, ArgumentError>;
+
+pub const NATIVES: [(&str, NativeFunction); 2] =
     [("print", feature_std::print), ("index", basic::index)];
