@@ -31,7 +31,7 @@ impl From<&Token> for Value {
 
 impl From<Token> for Type {
     fn from(value: Token) -> Self {
-        match value.lexeme() {
+        match value.lexeme().as_str() {
             "Integer" => Type::Integer,
             "List" => Type::List,
             "Number" => Type::Number,

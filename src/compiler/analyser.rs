@@ -578,10 +578,7 @@ fn analyse_module(
 
         let binding = resolve_import(import.clone(), Rc::clone(&imported_module))?;
 
-        module
-            .borrow_mut()
-            .bindings
-            .insert(binding.name(), binding);
+        module.borrow_mut().bindings.insert(binding.name(), binding);
     }
 
     for function in parse_tree.functions() {
@@ -602,7 +599,7 @@ fn analyse_module(
                 args.push((arg.name(), arg.pattern().into()))
             }
 
-            let body = convert_expr(method.body(), Rc::clone(&module))?;
+            let (body, _) = convert_expr(method.body(), Rc::clone(&module), vec![])?;
 
             methods.push(RefCell::new(Method { args, body }));
         }
@@ -620,7 +617,11 @@ fn analyse_module(
     Ok(())
 }
 
-fn convert_expr(expr: &parser::Expr, module: Rc<RefCell<Module>>) -> Result<Expr> {
+fn convert_expr(
+    expr: &parser::Expr,
+    module: Rc<RefCell<Module>>,
+    bindings: Vec<String>,
+) -> Result<(Expr, Vec<String>)> {
     use parser::Expr as ParseExpr;
 
     let result = match expr {
@@ -638,42 +639,74 @@ fn convert_expr(expr: &parser::Expr, module: Rc<RefCell<Module>>) -> Result<Expr
                 _ => internal_error!("parsed token '{:?}' as operator", operator),
             };
 
-            Expr::Binary {
-                left: Box::new(convert_expr(left, Rc::clone(&module))?),
-                operator,
-                right: Box::new(convert_expr(right, module)?),
-            }
+            let (left, bindings) = convert_expr(left, Rc::clone(&module), bindings)?;
+            let (right, bindings) = convert_expr(right, module, bindings)?;
+
+            (
+                Expr::Binary {
+                    left: Box::new(left),
+                    operator,
+                    right: Box::new(right),
+                },
+                bindings,
+            )
         }
-        ParseExpr::Block { body, end } => Expr::Block {
-            body: convert_exprs(body, &module)?,
-            line: end.line(),
-        },
+        ParseExpr::Block { body, end } => {
+            let body = convert_exprs(body, &module, &bindings)?;
+            (
+                Expr::Block {
+                    body,
+                    line: end.line(),
+                },
+                bindings,
+            )
+        }
         ParseExpr::Call {
             callee,
             paren,
             arguments,
-        } => Expr::Call {
-            callee: Box::new(convert_expr(callee, Rc::clone(&module))?),
-            arguments: convert_exprs(arguments, &module)?,
-            line: paren.line(),
-        },
-        ParseExpr::Grouping(expr) => {
-            Expr::Grouping(Box::new(convert_expr(expr, Rc::clone(&module))?))
+        } => {
+            let (callee, bindings) = convert_expr(callee, Rc::clone(&module), bindings)?;
+            let arguments = convert_exprs(arguments, &module, &bindings)?;
+            (
+                Expr::Call {
+                    callee: Box::new(callee),
+                    arguments,
+                    line: paren.line(),
+                },
+                bindings,
+            )
         }
-        ParseExpr::Let { pattern, value } => Expr::Let {
-            pattern: pattern.into(),
-            value: Box::new(convert_expr(value, module)?),
-        },
-        ParseExpr::List { expressions, end } => Expr::List {
-            expressions: convert_exprs(expressions, &module)?,
-            line: end.line(),
-        },
+        ParseExpr::Grouping(expr) => {
+            let (expr, bindings) = convert_expr(expr, Rc::clone(&module), bindings)?;
+            (Expr::Grouping(Box::new(expr)), bindings)
+        }
+        ParseExpr::Let { pattern, value } => {
+            let (value, bindings) = convert_expr(value, module, bindings)?;
+            (
+                Expr::Let {
+                    pattern: pattern.into(),
+                    value: Box::new(value),
+                },
+                bindings,
+            )
+        }
+        ParseExpr::List { expressions, end } => (
+            Expr::List {
+                expressions: convert_exprs(expressions, &module, &bindings)?,
+                line: end.line(),
+            },
+            bindings,
+        ),
         ParseExpr::Literal(token) => {
             let line = token.line();
-            Expr::Literal {
-                value: token.into(),
-                line,
-            }
+            (
+                Expr::Literal {
+                    value: token.into(),
+                    line,
+                },
+                bindings,
+            )
         }
         ParseExpr::Method(method) => {
             let args = method
@@ -681,8 +714,8 @@ fn convert_expr(expr: &parser::Expr, module: Rc<RefCell<Module>>) -> Result<Expr
                 .iter()
                 .map(|x| (x.name(), x.pattern().into()))
                 .collect();
-            let body = convert_expr(method.body(), module)?;
-            Expr::Method(Box::new(Method { args, body }))
+            let (body, _) = convert_expr(method.body(), module, bindings.clone())?;
+            (Expr::Method(Box::new(Method { args, body })), bindings)
         }
         ParseExpr::Unary { operator, right } => {
             let operator = match operator.kind() {
@@ -690,13 +723,19 @@ fn convert_expr(expr: &parser::Expr, module: Rc<RefCell<Module>>) -> Result<Expr
                 _ => internal_error!("parsed token {:?} as unary", operator),
             };
 
-            Expr::Unary {
-                operator,
-                right: Box::new(convert_expr(right, module)?),
-            }
+            let (right, bindings) = convert_expr(right, module, bindings)?;
+
+            (
+                Expr::Unary {
+                    operator,
+                    right: Box::new(right),
+                },
+                bindings,
+            )
         }
         ParseExpr::Variable(var) => {
-            if var.next().is_some() {
+            let mut bindings = bindings;
+            let expr = if var.next().is_some() {
                 let item = resolve_import(var.clone(), module)?;
 
                 let function = match item {
@@ -713,6 +752,8 @@ fn convert_expr(expr: &parser::Expr, module: Rc<RefCell<Module>>) -> Result<Expr
                 };
 
                 Expr::Function(function)
+            } else if bindings.contains(var.name().lexeme()) {
+                Expr::Variable(var.name().lexeme().to_string())
             } else if module
                 .borrow()
                 .function_names
@@ -726,17 +767,29 @@ fn convert_expr(expr: &parser::Expr, module: Rc<RefCell<Module>>) -> Result<Expr
                     Expr::Variable(var.name().lexeme().to_string())
                 }
             } else {
-                Expr::Variable(var.name().lexeme().to_string())
-            }
+                let name = var.name().lexeme().to_string();
+                bindings.push(name.clone());
+                Expr::Variable(name)
+            };
+
+            (expr, bindings)
         }
     };
 
     Ok(result)
 }
 
-fn convert_exprs(value: &[parser::Expr], module: &Rc<RefCell<Module>>) -> Result<Vec<Expr>> {
-    value
-        .iter()
-        .map(|x| convert_expr(x, Rc::clone(module)))
-        .collect()
+fn convert_exprs(
+    values: &[parser::Expr],
+    module: &Rc<RefCell<Module>>,
+    bindings: &Vec<String>,
+) -> Result<Vec<Expr>> {
+    let mut result = vec![];
+    let mut expr;
+    let mut inner_bindings = bindings.clone();
+    for value in values {
+        (expr, inner_bindings) = convert_expr(value, Rc::clone(module), inner_bindings)?;
+        result.push(expr);
+    }
+    Ok(result)
 }

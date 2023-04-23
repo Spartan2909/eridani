@@ -87,7 +87,7 @@ impl Token {
         self.kind
     }
 
-    pub fn lexeme(&self) -> &str {
+    pub fn lexeme(&self) -> &String {
         &self.lexeme
     }
 
