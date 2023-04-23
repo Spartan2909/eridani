@@ -1,5 +1,6 @@
 use crate::{
     common::{
+        natives,
         value::{Pattern, Value},
         EridaniFunction,
     },
@@ -125,6 +126,18 @@ impl Function {
         match self {
             Function::Eridani { methods, .. } => methods.to_vec(),
             Function::Rust { .. } => vec![],
+        }
+    }
+
+    fn calls(&self) -> Vec<Rc<RefCell<Function>>> {
+        if let Function::Eridani { methods, .. } = self {
+            let mut calls = vec![];
+            for method in methods {
+                calls.append(&mut method.borrow().body.calls());
+            }
+            calls
+        } else {
+            vec![]
         }
     }
 }
@@ -302,7 +315,26 @@ impl Expr {
     }
 }
 
-#[derive(Debug)]
+struct Calls {
+    calls: Vec<Rc<RefCell<Function>>>,
+}
+
+impl Calls {
+    fn new() -> Self {
+        Calls { calls: vec![] }
+    }
+
+    fn push(&mut self, function: Rc<RefCell<Function>>) {
+        if !self.calls.contains(&function) {
+            self.calls.push(Rc::clone(&function));
+            for call in function.borrow().calls() {
+                self.push(call);
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 enum Binding {
     Function(Rc<RefCell<Function>>),
     Module(Rc<RefCell<Module>>),
@@ -328,13 +360,13 @@ struct Module {
 }
 
 impl Module {
-    fn new(name: &str) -> Module {
+    fn new(name: &str, bindings: BTreeMap<String, Binding>) -> Module {
         Module {
             name: name.to_string(),
             submodules: vec![],
             functions: vec![],
             function_names: vec![],
-            bindings: BTreeMap::new(),
+            bindings,
             supermodule: Weak::new(),
         }
     }
@@ -497,18 +529,78 @@ fn resolve_import(
     Ok(binding)
 }
 
+fn get_std() -> Result<(Vec<Rc<RefCell<Module>>>, BTreeMap<String, Binding>)> {
+    let mut eridani_std = super::eridani_std::ERIDANI_STD_BASIC.to_owned();
+
+    #[cfg(feature = "target_std")]
+    (eridani_std += super::eridani_std::ERIDANI_STD_FEATURE_STD);
+
+    #[cfg(feature = "target_web")]
+    (eridani_std += super::eridani_std::ERIDANI_STD_FEATURE_WEB);
+
+    let natives_module = Rc::new(RefCell::new(Module::new("internals", BTreeMap::new())));
+    for (name, func) in natives::NATIVES {
+        natives_module
+            .borrow_mut()
+            .functions
+            .push(Rc::new(RefCell::new(Function::Rust {
+                name: name.to_string(),
+                func: Box::new(func),
+            })));
+    }
+
+    let std_module = Rc::new(RefCell::new(Module::new("std", BTreeMap::new())));
+    std_module
+        .borrow_mut()
+        .submodules
+        .push((Rc::clone(&natives_module), false));
+
+    let mut modules = vec![Rc::clone(&std_module), Rc::clone(&natives_module)];
+
+    let eridani_std = parser::parse(scanner::scan(&eridani_std)?)?;
+    analyse_module(
+        eridani_std,
+        None,
+        Rc::clone(&std_module),
+        &mut modules,
+        &BTreeMap::new(),
+    )?;
+
+    let prelude = super::eridani_std::PRELUDE;
+    let mut bindings = BTreeMap::new();
+    for function in std_module.borrow().functions.iter() {
+        if prelude.contains(&function.borrow().name()) {
+            bindings.insert(
+                function.borrow().name().to_string(),
+                Binding::Function(Rc::clone(&function)),
+            );
+        }
+    }
+
+    Ok((modules, bindings))
+}
+
+fn clone_bindings(bindings: &BTreeMap<String, Binding>) -> BTreeMap<String, Binding> {
+    BTreeMap::from_iter(bindings.iter().map(|(a, b)| (a.clone(), b.clone())))
+}
+
 pub fn analyse(
     parse_tree: ParseTree,
     source_origin: Option<&str>,
     entry_point: &str,
 ) -> Result<Program> {
-    let root_module = Rc::new(RefCell::new(Module::new("")));
-    let mut modules = vec![Rc::clone(&root_module)];
+    let (mut modules, default_bindings) = get_std()?;
+    let root_module = Rc::new(RefCell::new(Module::new(
+        "",
+        clone_bindings(&default_bindings),
+    )));
+    modules.push(Rc::clone(&root_module));
     analyse_module(
         parse_tree,
         source_origin,
         Rc::clone(&root_module),
         &mut modules,
+        &default_bindings,
     )?;
 
     let entry_point = match root_module.borrow().find_function(entry_point) {
@@ -519,34 +611,9 @@ pub fn analyse(
         }
     };
 
-    let mut functions = vec![];
-    for module in modules {
-        functions.append(&mut module.borrow_mut().functions)
-    }
-
-    let mut calls = vec![];
-    for function in &functions {
-        for method in function.borrow().methods() {
-            for call in method.borrow().body.calls() {
-                if !calls.contains(&call) && &call != function {
-                    calls.push(call);
-                }
-            }
-        }
-    }
-
-    let mut to_remove = vec![];
-    for (i, function) in functions.iter().enumerate() {
-        if !calls.contains(function) {
-            to_remove.push(i);
-        }
-    }
-
-    for (removed, index) in to_remove.iter().enumerate() {
-        functions.remove(*index - removed);
-    }
-
-    functions.push(Rc::clone(&entry_point));
+    let mut calls = Calls::new();
+    calls.push(Rc::clone(&entry_point));
+    let functions = calls.calls;
 
     Ok((entry_point, functions))
 }
@@ -556,13 +623,17 @@ fn analyse_module(
     source_origin: Option<&str>,
     module: Rc<RefCell<Module>>,
     modules: &mut Vec<Rc<RefCell<Module>>>,
+    bindings: &BTreeMap<String, Binding>,
 ) -> Result<()> {
     for (public, module_name) in parse_tree.modules() {
         let public = public.is_some();
         let (submodule, submodule_origin) =
             resolve_submodule(module_name.lexeme(), module_name.line(), source_origin)?;
         let submodule_parse_tree = parser::parse(scanner::scan(&submodule)?)?;
-        let submodule = Rc::new(RefCell::new(Module::new(module_name.lexeme())));
+        let submodule = Rc::new(RefCell::new(Module::new(
+            module_name.lexeme(),
+            clone_bindings(bindings),
+        )));
         modules.push(Rc::clone(&submodule));
         module
             .borrow_mut()
@@ -577,6 +648,7 @@ fn analyse_module(
             Some(&submodule_origin),
             Rc::clone(&submodule),
             modules,
+            bindings,
         )?;
     }
 
@@ -606,13 +678,26 @@ fn analyse_module(
 
         let mut methods = vec![];
         for method in function.methods() {
-            let mut args = vec![];
+            let args: Vec<(Option<String>, Pattern)> = method
+                .args()
+                .iter()
+                .map(|x| (x.name(), x.pattern().into()))
+                .collect();
 
-            for arg in method.args() {
-                args.push((arg.name(), arg.pattern().into()))
+            let mut internal_bindings = vec![];
+            for (name, pattern) in args.iter().map(|(a, b)| (a, b)) {
+                if let Some(name) = name {
+                    internal_bindings.push(name.clone());
+                }
+                internal_bindings.append(&mut pattern.bindings());
             }
 
-            let (body, _) = convert_expr(method.body(), Rc::clone(&module), vec![], modules)?;
+            let (body, _) = convert_expr(
+                method.body(),
+                Rc::clone(&module),
+                internal_bindings,
+                modules,
+            )?;
 
             methods.push(RefCell::new(Method { args, body }));
         }
@@ -723,12 +808,21 @@ fn convert_expr(
             )
         }
         ParseExpr::Method(method) => {
-            let args = method
+            let args: Vec<(Option<String>, Pattern)> = method
                 .args()
                 .iter()
                 .map(|x| (x.name(), x.pattern().into()))
                 .collect();
-            let (body, _) = convert_expr(method.body(), module, bindings.clone(), modules)?;
+
+            let mut internal_bindings = bindings.clone();
+            for (name, pattern) in args.iter().map(|(a, b)| (a, b)) {
+                if let Some(name) = name {
+                    internal_bindings.push(name.clone());
+                }
+                internal_bindings.append(&mut pattern.bindings());
+            }
+
+            let (body, _) = convert_expr(method.body(), module, internal_bindings, modules)?;
             (Expr::Method(Box::new(Method { args, body })), bindings)
         }
         ParseExpr::Unary { operator, right } => {

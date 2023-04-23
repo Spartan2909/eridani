@@ -9,6 +9,7 @@ use std::error;
 use crate::prelude::*;
 
 pub(crate) mod analyser;
+mod eridani_std;
 pub(crate) mod parser;
 pub(crate) mod scanner;
 

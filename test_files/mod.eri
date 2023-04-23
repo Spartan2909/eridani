@@ -1,8 +1,7 @@
 module fib
-use fibonacci in fib
 
 unused is
     () unused()
 
 main is
-    () print(fibonacci(5))
+    () print(fibonacci in fib(5))

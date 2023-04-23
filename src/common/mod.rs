@@ -1,3 +1,4 @@
+mod discriminant;
 pub(crate) mod natives;
 pub(crate) mod value;
 use value::Value;
@@ -11,6 +12,15 @@ impl ArgumentError {
         ArgumentError {
             description: description.to_string(),
         }
+    }
+}
+
+pub fn get(args: &[Value], index: usize) -> Result<Value, ArgumentError> {
+    if let Some(value) = args.get(index) {
+        Ok(value.clone())
+    } else {
+        let description = format!("No item at index '{index}'");
+        Err(ArgumentError::new(&description))
     }
 }
 

@@ -15,6 +15,21 @@ pub enum Value {
     String(String),
 }
 
+impl From<Option<Value>> for Value {
+    fn from(value: Option<Value>) -> Self {
+        match value {
+            Some(value) => value,
+            None => Value::Nothing,
+        }
+    }
+}
+
+impl From<Option<&Value>> for Value {
+    fn from(value: Option<&Value>) -> Self {
+        value.map(|value| value.clone()).into()
+    }
+}
+
 impl Add for Value {
     type Output = Option<Value>;
 
