@@ -1,1 +1,5 @@
-index is (value: List, index: Integer) index in internals(value, index)
+index is (value: List, index: Integer) something(index in internals(value, index))
+
+index_or_nothing is (value: List, index: Integer) index in internals(value, index)
+
+something is (value: != nothing) value

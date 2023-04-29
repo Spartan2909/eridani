@@ -17,6 +17,7 @@ impl From<Token> for Value {
 impl From<&Token> for Value {
     fn from(value: &Token) -> Self {
         match value.kind() {
+            TokenType::Nothing => Value::Nothing,
             TokenType::Number => Value::Number(
                 value
                     .lexeme()

@@ -512,7 +512,7 @@ impl Parser {
         ) {
             let comparison = self.previous().clone();
             let rhs = self.consume_any(
-                vec![TokenType::Number, TokenType::String],
+                vec![TokenType::Number, TokenType::String, TokenType::Nothing],
                 "Expect literal after comparison",
             )?;
 
