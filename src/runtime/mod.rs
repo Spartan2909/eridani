@@ -46,7 +46,7 @@ impl Error {
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for (name, line) in &self.trace {
+        for (name, line) in self.trace.iter().rev() {
             if *line == usize::MAX {
                 writeln!(f, "In {}:", name)?;
             } else {

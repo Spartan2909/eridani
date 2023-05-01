@@ -333,10 +333,16 @@ impl Pattern {
                 operator,
                 right,
             } => {
-                left.matches(value, bindings)?;
                 if *operator == LogOp::Or {
-                    Some(())
+                    let left = left.matches(value, bindings);
+                    let right = right.matches(value, bindings);
+                    if left.is_some() || right.is_some() {
+                        Some(())
+                    } else {
+                        None
+                    }
                 } else {
+                    left.matches(value, bindings)?;
                     right.matches(value, bindings)?;
                     Some(())
                 }

@@ -8,15 +8,16 @@ use crate::{
 use alloc::{collections::BTreeMap, rc::Rc};
 use core::cell::RefCell;
 
-fn expr(expression: Expr, bindings: &mut BTreeMap<String, Value>, line: usize) -> Result<Value> {
+fn expr(expression: Expr, bindings: &mut BTreeMap<String, Value>) -> Result<Value> {
+    let line = expression.line();
     match expression {
         Expr::Binary {
             left,
             operator,
             right,
         } => {
-            let left = expr(*left, bindings, line)?;
-            let right = expr(*right, bindings, line)?;
+            let left = expr(*left, bindings)?;
+            let right = expr(*right, bindings)?;
 
             let result = match operator {
                 BinOp::Add => &left + &right,
@@ -37,7 +38,7 @@ fn expr(expression: Expr, bindings: &mut BTreeMap<String, Value>, line: usize) -
         Expr::Block { body, .. } => {
             let values: Result<Vec<Value>> = body
                 .into_iter()
-                .map(|expression| expr(expression, bindings, line))
+                .map(|expression| expr(expression, bindings))
                 .collect();
             Ok(values?.into_iter().last().unwrap_or(Value::Nothing))
         }
@@ -46,10 +47,10 @@ fn expr(expression: Expr, bindings: &mut BTreeMap<String, Value>, line: usize) -
             arguments,
             line,
         } => {
-            let callee = expr(*callee, bindings, line)?;
+            let callee = expr(*callee, bindings)?;
             let arguments: Result<Vec<Value>> = arguments
                 .into_iter()
-                .map(|expression| expr(expression, bindings, line))
+                .map(|expression| expr(expression, bindings))
                 .collect();
             let arguments = arguments?;
             match callee {
@@ -64,7 +65,7 @@ fn expr(expression: Expr, bindings: &mut BTreeMap<String, Value>, line: usize) -
                         }
                     };
 
-                    expr(method.body().to_owned(), &mut internal_bindings, line)
+                    expr(method.body().to_owned(), &mut internal_bindings)
                 }
                 _ => {
                     let message = format!("Cannot call value {callee}");
@@ -72,10 +73,10 @@ fn expr(expression: Expr, bindings: &mut BTreeMap<String, Value>, line: usize) -
                 }
             }
         }
-        Expr::Function(func) => Ok(Value::Function(func)),
-        Expr::Grouping(expression) => expr(*expression, bindings, line),
+        Expr::Function { function, .. } => Ok(Value::Function(function)),
+        Expr::Grouping(expression) => expr(*expression, bindings),
         Expr::Let { pattern, value } => {
-            let value = expr(*value, bindings, line)?;
+            let value = expr(*value, bindings)?;
             let mut new_bindings = BTreeMap::new();
             match pattern.matches(&value, &mut new_bindings) {
                 Some(_) => {}
@@ -87,10 +88,10 @@ fn expr(expression: Expr, bindings: &mut BTreeMap<String, Value>, line: usize) -
 
             Ok(Value::Nothing)
         }
-        Expr::List { expressions, line } => {
+        Expr::List { expressions, .. } => {
             let expressions: Result<Vec<Value>> = expressions
                 .into_iter()
-                .map(|expression| expr(expression, bindings, line))
+                .map(|expression| expr(expression, bindings))
                 .collect();
             let expressions = expressions?;
             Ok(Value::List(expressions))
@@ -101,7 +102,7 @@ fn expr(expression: Expr, bindings: &mut BTreeMap<String, Value>, line: usize) -
             internal_error!("placeholder '{:?}' at runtime", placeholder)
         }
         Expr::Unary { operator, right } => {
-            let right = expr(*right, bindings, line)?;
+            let right = expr(*right, bindings)?;
             match operator {
                 UnOp::Negate => {
                     if let Some(value) = -right {
@@ -112,7 +113,7 @@ fn expr(expression: Expr, bindings: &mut BTreeMap<String, Value>, line: usize) -
                 }
             }
         }
-        Expr::Variable(name) => {
+        Expr::Variable { name, line } => {
             if let Some(value) = bindings.get(&name) {
                 Ok(value.to_owned())
             } else {
@@ -155,13 +156,18 @@ fn function(function: Rc<RefCell<Function>>, args: &[Value], line: usize) -> Res
             function.borrow().name(),
             args
         );
-        Err(Error::new("Match", &message, line)).extend_trace(function.borrow().name(), 0)
+        Err(Error::new("Match", &message, line)).extend_trace(function.borrow().name(), line)
     } else if matches.len() == 1 {
-        expr(
-            function.borrow().methods()[0].borrow().body().to_owned(),
+        match expr(
+            function.borrow().methods()[matches[0].0]
+                .borrow()
+                .body()
+                .to_owned(),
             &mut matches[0].1,
-            line,
-        )
+        ) {
+            Ok(value) => Ok(value),
+            Err(e) => Err(e).add_function_name(function.borrow().name()),
+        }
     } else {
         todo!()
     }
@@ -172,3 +178,6 @@ pub fn walk_tree(program: Program, args: &[Value]) -> Result<Value> {
 
     function(entry_point, args, 0)
 }
+
+#[cfg(test)]
+mod tests;

@@ -213,7 +213,10 @@ pub enum Expr {
         arguments: Vec<Self>,
         line: usize,
     },
-    Function(Rc<RefCell<Function>>),
+    Function {
+        function: Rc<RefCell<Function>>,
+        line: usize,
+    },
     Grouping(Box<Self>),
     Let {
         pattern: Pattern,
@@ -233,7 +236,10 @@ pub enum Expr {
         operator: UnOp,
         right: Box<Self>,
     },
-    Variable(String),
+    Variable {
+        name: String,
+        line: usize,
+    },
 }
 
 impl Expr {
@@ -256,7 +262,7 @@ impl Expr {
                     expr.resolve_placeholders(module)?;
                 }
             }
-            Self::Function(_) => {}
+            Self::Function { .. } => {}
             Self::Grouping(expr) => expr.resolve_placeholders(module)?,
             Self::Let { value, .. } => value.resolve_placeholders(module)?,
             Self::List { expressions, .. } => {
@@ -286,11 +292,14 @@ impl Expr {
                         internal_error!("dangling placeholder")
                     };
 
-                    *self = Self::Function(function);
+                    *self = Self::Function {
+                        function,
+                        line: placeholder.line(),
+                    };
                 }
             }
             Self::Unary { right, .. } => right.resolve_placeholders(module)?,
-            Self::Variable(_) => {}
+            Self::Variable { .. } => {}
         }
 
         Ok(())
@@ -322,7 +331,7 @@ impl Expr {
 
                 calls
             }
-            Self::Function(function) => vec![Rc::clone(function)],
+            Self::Function { function, .. } => vec![Rc::clone(function)],
             Self::Grouping(expr) => expr.calls(),
             Self::Let { value, .. } => value.calls(),
             Self::List { expressions, .. } => {
@@ -337,7 +346,36 @@ impl Expr {
             Self::Method(method) => method.body.calls(),
             Self::PlaceHolder(_) => internal_error!("called 'calls' on placeholder"),
             Self::Unary { right, .. } => right.calls(),
-            Self::Variable(_) => vec![],
+            Self::Variable { .. } => vec![],
+        }
+    }
+
+    pub(crate) fn line(&self) -> usize {
+        match self {
+            Expr::Binary { right, .. } => right.line(),
+            Expr::Block { body, line } => {
+                if let Some(expr) = body.last() {
+                    expr.line()
+                } else {
+                    *line
+                }
+            }
+            Expr::Call { line, .. } => *line,
+            Expr::Function { line, .. } => *line,
+            Expr::Grouping(expr) => expr.line(),
+            Expr::Let { value, .. } => value.line(),
+            Expr::List { expressions, line } => {
+                if let Some(expr) = expressions.last() {
+                    expr.line()
+                } else {
+                    *line
+                }
+            }
+            Expr::Literal { line, .. } => *line,
+            Expr::Method(method) => method.body.line(),
+            Expr::PlaceHolder(placeholder) => placeholder.line(),
+            Expr::Unary { right, .. } => right.line(),
+            Expr::Variable { line, .. } => *line,
         }
     }
 }
@@ -930,9 +968,15 @@ fn convert_expr(
                     }
                 };
 
-                Expr::Function(function)
+                Expr::Function {
+                    function,
+                    line: var.line(),
+                }
             } else if bindings.contains(var.name().lexeme()) {
-                Expr::Variable(var.name().lexeme().to_string())
+                Expr::Variable {
+                    name: var.name().lexeme().to_string(),
+                    line: var.line(),
+                }
             } else if module
                 .borrow()
                 .function_names
@@ -943,12 +987,18 @@ fn convert_expr(
                 if let Binding::Function(_) = binding {
                     Expr::PlaceHolder(var.clone())
                 } else {
-                    Expr::Variable(var.name().lexeme().to_string())
+                    Expr::Variable {
+                        name: var.name().lexeme().to_string(),
+                        line: var.line(),
+                    }
                 }
             } else {
                 let name = var.name().lexeme().to_string();
                 bindings.push(name.clone());
-                Expr::Variable(name)
+                Expr::Variable {
+                    name,
+                    line: var.line(),
+                }
             };
 
             (expr, bindings)
