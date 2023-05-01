@@ -73,6 +73,10 @@ impl NamedPattern {
     pub fn pattern(&self) -> &Pattern {
         &self.pattern
     }
+
+    pub fn line(&self) -> usize {
+        self.pattern.line()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -108,6 +112,22 @@ pub enum Pattern {
         right: Box<Pattern>,
     },
     Wildcard(Token),
+}
+
+impl Pattern {
+    fn line(&self) -> usize {
+        match self {
+            Pattern::Binary { right, .. } => right.line(),
+            Pattern::Comparision { rhs, .. } => rhs.line(),
+            Pattern::List { right, .. } => right.line(),
+            Pattern::Literal(literal) => literal.line(),
+            Pattern::OperatorComparison { rhs, .. } => rhs.line(),
+            Pattern::Range { upper, .. } => upper.line(),
+            Pattern::Type(kind) => kind.line(),
+            Pattern::Unary { right, .. } => right.line(),
+            Pattern::Wildcard(name) => name.line(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

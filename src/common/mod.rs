@@ -1,8 +1,10 @@
 mod discriminant;
+pub(crate) mod match_engine;
 pub(crate) mod natives;
 pub(crate) mod value;
 use value::Value;
 
+#[derive(Debug, Clone)]
 pub struct ArgumentError {
     description: String,
 }
@@ -12,6 +14,10 @@ impl ArgumentError {
         ArgumentError {
             description: description.to_string(),
         }
+    }
+
+    pub fn description(&self) -> &String {
+        &self.description
     }
 }
 
@@ -47,3 +53,23 @@ impl<'a> Clone for Box<dyn 'a + EridaniFunction> {
         (**self).clone_box()
     }
 }
+
+#[cfg(debug_assertions)]
+macro_rules! internal_error {
+    ( $str:expr ) => {
+        panic!(concat!("internal compiler error: ", $str))
+    };
+
+    ( $str:expr, $( $arg:expr )* ) => {
+        panic!(concat!("internal compiler error: ", $str), $( $arg )*)
+    };
+}
+
+#[cfg(not(debug_assertions))]
+macro_rules! internal_error {
+    ( $( $tokens:tt )* ) => {
+        panic!("internal compiler error")
+    };
+}
+
+pub(crate) use internal_error;

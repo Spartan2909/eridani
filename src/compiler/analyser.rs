@@ -1,11 +1,10 @@
 use crate::{
     common::{
-        natives,
-        value::{Pattern, Value},
+        internal_error, natives,
+        value::{self, Pattern, Value},
         EridaniFunction,
     },
     compiler::{
-        internal_error,
         parser::{self, ImportTree, ParseTree},
         scanner::{self, TokenType},
         Error, Result,
@@ -17,7 +16,10 @@ use alloc::{
     collections::BTreeMap,
     rc::{Rc, Weak},
 };
-use core::{cell::RefCell, fmt::Debug, iter};
+use core::{
+    cell::RefCell,
+    fmt::{self, Debug},
+};
 
 #[cfg(not(feature = "no_std"))]
 use std::{fs, path};
@@ -78,7 +80,7 @@ impl PartialEq for Function {
                     return false;
                 }
 
-                for (method1, method2) in iter::zip(methods1, methods2) {
+                for (method1, method2) in methods1.iter().zip(methods2) {
                     if method1.as_ptr() != method2.as_ptr() {
                         return false;
                     }
@@ -122,10 +124,11 @@ impl Function {
         Ok(())
     }
 
-    fn methods(&self) -> Vec<RefCell<Method>> {
-        match self {
-            Function::Eridani { methods, .. } => methods.to_vec(),
-            Function::Rust { .. } => vec![],
+    pub fn methods(&self) -> &Vec<RefCell<Method>> {
+        if let Function::Eridani { methods, .. } = self {
+            methods
+        } else {
+            internal_error!("attempted to get methods of native")
         }
     }
 
@@ -138,6 +141,14 @@ impl Function {
             calls
         } else {
             vec![]
+        }
+    }
+
+    pub fn native(&self) -> Option<Box<dyn EridaniFunction>> {
+        if let Function::Rust { func, .. } = self {
+            Some(func.clone())
+        } else {
+            None
         }
     }
 }
@@ -154,6 +165,10 @@ impl Method {
     pub fn args(&self) -> &Vec<(Option<String>, Pattern)> {
         &self.args
     }
+
+    pub fn body(&self) -> &Expr {
+        &self.body
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -163,6 +178,18 @@ pub enum BinOp {
     Mul,
     Div,
     Mod,
+}
+
+impl fmt::Display for BinOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BinOp::Add => write!(f, "+"),
+            BinOp::Sub => write!(f, "-"),
+            BinOp::Mul => write!(f, "*"),
+            BinOp::Div => write!(f, "/"),
+            BinOp::Mod => write!(f, "%"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -527,6 +554,7 @@ fn resolve_import(
     Ok(binding)
 }
 
+#[allow(clippy::type_complexity)]
 fn get_std() -> Result<(Vec<Rc<RefCell<Module>>>, BTreeMap<String, Binding>)> {
     let mut eridani_std = super::eridani_std::ERIDANI_STD_BASIC.to_owned();
 
@@ -580,6 +608,45 @@ fn get_std() -> Result<(Vec<Rc<RefCell<Module>>>, BTreeMap<String, Binding>)> {
 
 fn clone_bindings(bindings: &BTreeMap<String, Binding>) -> BTreeMap<String, Binding> {
     BTreeMap::from_iter(bindings.iter().map(|(a, b)| (a.clone(), b.clone())))
+}
+
+fn verify_pattern(pattern: Pattern, line: usize) -> Result<Pattern> {
+    match pattern.clone() {
+        Pattern::Binary {
+            left,
+            right,
+            operator,
+        } => {
+            if (left.is_literal(&[]) || right.is_literal(&[])) && operator == value::LogOp::And {
+                return Err(Error::new(
+                    line,
+                    "Pattern",
+                    "",
+                    "Patterns of the form '<literal> & <pattern>' are forbidden",
+                ));
+            }
+            verify_pattern(*left, line)?;
+            verify_pattern(*right, line)?;
+        }
+        Pattern::List { left, right } => {
+            verify_pattern(*left, line)?;
+            verify_pattern(*right, line)?;
+        }
+        Pattern::Range {
+            lower,
+            upper,
+            inclusive,
+        } => {
+            let lower = lower.expect_number();
+            let upper = upper.expect_number();
+            if lower > upper || !inclusive && lower == upper {
+                return Err(Error::new(line, "Pattern", "", "Range will never match"));
+            }
+        }
+        _ => {}
+    }
+
+    Ok(pattern)
 }
 
 pub fn analyse(
@@ -676,11 +743,15 @@ fn analyse_module(
 
         let mut methods = vec![];
         for method in function.methods() {
-            let args: Vec<(Option<String>, Pattern)> = method
+            let tmp: Vec<(Option<String>, Result<Pattern>)> = method
                 .args()
                 .iter()
-                .map(|x| (x.name(), x.pattern().into()))
+                .map(|x| (x.name(), verify_pattern(x.pattern().into(), x.line())))
                 .collect();
+            let mut args = vec![];
+            for (name, pattern) in tmp {
+                args.push((name, pattern?))
+            }
 
             let mut internal_bindings = vec![];
             for (name, pattern) in args.iter().map(|(a, b)| (a, b)) {

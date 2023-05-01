@@ -1,7 +1,7 @@
 use super::*;
 
 use crate::compiler::{
-    internal_error, parser,
+    parser,
     scanner::{Token, TokenType},
 };
 

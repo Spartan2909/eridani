@@ -49,3 +49,6 @@ mod runtime;
 
 #[cfg(feature = "tree_walk")]
 mod treewalk;
+
+#[cfg(feature = "tree_walk")]
+pub use treewalk::walk_tree;

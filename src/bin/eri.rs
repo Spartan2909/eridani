@@ -1,4 +1,4 @@
-use std::fs;
+use std::{fs, process::ExitCode};
 
 use clap::Parser;
 
@@ -21,7 +21,7 @@ struct Args {
     entry_point: Option<String>,
 }
 
-fn main() {
+fn main() -> ExitCode {
     let args = Args::parse();
     let entry_point = if let Some(string) = args.entry_point {
         string
@@ -33,5 +33,25 @@ fn main() {
         fs::canonicalize(&args.file_path).expect("Should have been able to read the file");
     let contents = fs::read_to_string(&file_path).expect("Should have been able to read the file");
 
-    dbg!(eridani::parse(&contents, file_path.to_str(), &entry_point));
+    let program = match eridani::parse(&contents, file_path.to_str(), &entry_point) {
+        Ok(tree) => tree,
+        Err(e) => {
+            eprintln!("{e}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    match eridani::walk_tree(program, &[]) {
+        Ok(value) => {
+            if value.is_something() {
+                println!("{value}")
+            }
+        }
+        Err(e) => {
+            eprintln!("{e}");
+            return ExitCode::FAILURE;
+        }
+    }
+
+    ExitCode::SUCCESS
 }
