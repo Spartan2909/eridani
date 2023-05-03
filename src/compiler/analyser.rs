@@ -153,7 +153,10 @@ impl Function {
     }
 }
 
-pub type Program = (Rc<RefCell<Function>>, Vec<Rc<RefCell<Function>>>);
+pub struct Program(
+    pub(crate) Rc<RefCell<Function>>,
+    pub(crate) Vec<Rc<RefCell<Function>>>,
+);
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Method {
@@ -718,7 +721,7 @@ pub fn analyse(
     calls.push(Rc::clone(&entry_point));
     let functions = calls.calls;
 
-    Ok((entry_point, functions))
+    Ok(Program(entry_point, functions))
 }
 
 fn analyse_module(

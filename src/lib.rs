@@ -38,11 +38,11 @@ mod common;
 #[cfg(feature = "compiler")]
 mod compiler;
 
-#[cfg(feature = "compiler")]
+#[cfg(all(feature = "compiler", not(feature = "tree_walk")))]
 pub use compiler::compile;
 
 #[cfg(feature = "tree_walk")]
-pub use compiler::{parse, Function};
+pub use compiler::parse;
 
 #[cfg(feature = "runtime")]
 mod runtime;
