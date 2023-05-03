@@ -14,21 +14,21 @@ pub enum ErrorInner {
     Generic {
         kind: String,
         message: String,
-        line: usize,
+        line: Option<usize>,
     },
 }
 
 #[derive(Debug, Clone)]
 pub struct Error {
     inner: ErrorInner,
-    trace: Vec<(String, usize)>,
+    trace: Vec<(String, usize, usize)>,
 }
 
 impl Error {
     pub fn from_argument_error(error: ArgumentError, function_name: &str) -> Self {
         Error {
             inner: ErrorInner::Argument(error),
-            trace: vec![(function_name.to_string(), usize::MAX)],
+            trace: vec![(function_name.to_string(), usize::MAX, 1)],
         }
     }
 
@@ -37,20 +37,33 @@ impl Error {
             inner: ErrorInner::Generic {
                 kind: kind.to_owned(),
                 message: message.to_owned(),
-                line,
+                line: Some(line),
             },
             trace: vec![],
         }
+    }
+
+    fn extend_trace(&mut self, function_name: &str, line: usize) {
+        if let Some((name, trace_line, count)) = self.trace.last_mut() {
+            if function_name == name && *trace_line == line {
+                *count += 1;
+                return;
+            }
+        }
+
+        self.trace.push((function_name.to_owned(), line, 1))
     }
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for (name, line) in self.trace.iter().rev() {
+        for (name, line, count) in self.trace.iter().rev() {
             if *line == usize::MAX {
-                writeln!(f, "In {}:", name)?;
+                writeln!(f, "In {name}:")?;
+            } else if *count > 1 {
+                writeln!(f, "Line {line}, in {name}:    ({count})")?;
             } else {
-                writeln!(f, "Line {}, in {}:", line, name)?;
+                writeln!(f, "Line {line}, in {name}:")?;
             }
         }
 
@@ -67,25 +80,39 @@ pub type Result<T> = result::Result<T, Error>;
 
 pub trait EridaniResult {
     fn extend_trace(self, function_name: &str, line: usize) -> Self;
-    fn add_function_name(self, function_name: &str) -> Self;
+    fn init_or_add_context(self, function_name: &str, line: usize) -> Self;
+    fn pop_trace(self) -> Self;
 }
 
 impl<T> EridaniResult for Result<T> {
     fn extend_trace(self, function_name: &str, line: usize) -> Self {
         if let Err(mut e) = self {
-            e.trace.push((function_name.to_owned(), line));
+            e.extend_trace(function_name, line);
             Err(e)
         } else {
             self
         }
     }
 
-    fn add_function_name(mut self, function_name: &str) -> Self {
+    fn init_or_add_context(mut self, function_name: &str, line: usize) -> Self {
         if let Err(e) = &mut self {
-            if let ErrorInner::Generic { line, .. } = &e.inner {
-                let line = *line;
-                e.trace.push((function_name.to_owned(), line));
+            if let ErrorInner::Generic { line, .. } = &mut e.inner {
+                if let Some(actual_line) = *line {
+                    *line = None;
+                    e.extend_trace(function_name, actual_line);
+                    return self;
+                }
             }
+
+            e.extend_trace(function_name, line);
+        }
+
+        self
+    }
+
+    fn pop_trace(mut self) -> Self {
+        if let Err(e) = &mut self {
+            e.trace.pop();
         }
 
         self
