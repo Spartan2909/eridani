@@ -61,7 +61,7 @@ mod feature_std {
         #[cfg(debug_assertions)]
         print!("<stdout> ");
 
-        println!("{}", item);
+        println!("{item}");
         Ok(Value::Nothing)
     }
 
@@ -73,7 +73,14 @@ mod feature_std {
 
         let mut buf = String::new();
         match io::stdin().read_line(&mut buf) {
-            Ok(_) => Ok(Value::String(buf)),
+            Ok(_) => {
+                let input = buf
+                    .strip_suffix("\r\n")
+                    .or(buf.strip_suffix("\n"))
+                    .unwrap_or(&buf)
+                    .to_string();
+                Ok(Value::String(input))
+            },
             Err(_) => Err(ArgumentError::new("Failed to read from stdin")),
         }
     }

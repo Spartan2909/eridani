@@ -178,7 +178,7 @@ impl fmt::Display for Value {
             Value::Method(_) => write!(f, "method"),
             Value::Nothing => write!(f, "nothing"),
             Value::Number(n) => write!(f, "{n}"),
-            Value::String(s) => write!(f, "\"{s}\""),
+            Value::String(s) => write!(f, "{s}"),
         }
     }
 }
