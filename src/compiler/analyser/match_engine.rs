@@ -1,7 +1,4 @@
-use crate::{
-    common::value::{Pattern, Value},
-    prelude::*,
-};
+use crate::{common::value::Value, compiler::analyser::pattern::Pattern, prelude::*};
 
 use core::cell::RefCell;
 

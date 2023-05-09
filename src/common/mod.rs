@@ -1,5 +1,4 @@
 mod discriminant;
-pub(crate) mod match_engine;
 pub(crate) mod natives;
 pub(crate) mod value;
 use value::Value;

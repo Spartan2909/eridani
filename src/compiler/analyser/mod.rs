@@ -1,10 +1,12 @@
+mod match_engine;
+mod pattern;
+
+pub use match_engine::match_args;
+
 use crate::{
-    common::{
-        internal_error, natives,
-        value::{self, Pattern, Value},
-        EridaniFunction,
-    },
+    common::{internal_error, natives, value::Value, EridaniFunction},
     compiler::{
+        analyser::pattern::{LogOp, Pattern},
         parser::{self, ImportTree, ParseTree},
         scanner::{self, TokenType},
         Error, Result,
@@ -665,7 +667,7 @@ fn verify_pattern(pattern: Pattern, line: usize) -> Result<Pattern> {
             right,
             operator,
         } => {
-            if (left.is_literal(&[]) || right.is_literal(&[])) && operator == value::LogOp::And {
+            if (left.is_literal(&[]) || right.is_literal(&[])) && operator == LogOp::And {
                 return Err(Error::new(
                     line,
                     "Pattern",
