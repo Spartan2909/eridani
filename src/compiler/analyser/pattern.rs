@@ -87,6 +87,56 @@ impl Item {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct OperatorChain {
+    operator: ArithOp,
+    mid: Item,
+    next: Option<Box<OperatorChain>>,
+}
+
+impl OperatorChain {
+    fn bindings(&self, mut bindings: Vec<String>) -> Vec<String> {
+        if let Item::Wildcard(name) = &self.mid {
+            bindings.push(name.to_owned());
+        }
+
+        if let Some(next) = &self.next {
+            next.bindings(bindings)
+        } else {
+            bindings
+        }
+    }
+}
+
+impl From<&parser::OperatorChain> for OperatorChain {
+    fn from(value: &parser::OperatorChain) -> Self {
+        let operator = match value.operator().kind() {
+            TokenType::Plus => ArithOp::Add,
+            TokenType::Minus => ArithOp::Sub,
+            TokenType::Star => ArithOp::Mul,
+            TokenType::Slash => ArithOp::Div,
+            TokenType::Mod => ArithOp::Mod,
+            _ => internal_error!("parsed token '{:?}' as operator", value.operator()),
+        };
+
+        let mid: Item = value.mid().into();
+
+        let next = if let Some(next) = value.next() {
+            Some(Box::new(next.into()))
+        } else {
+            None
+        };
+
+        OperatorChain { operator, mid, next }
+    }
+}
+
+impl From<parser::OperatorChain> for OperatorChain {
+    fn from(value: parser::OperatorChain) -> Self {
+        (&value).into()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Pattern {
     Binary {
         left: Box<Pattern>,
@@ -103,8 +153,7 @@ pub enum Pattern {
     },
     Literal(Value),
     OperatorComparison {
-        operator: ArithOp,
-        mid: Item,
+        operator_chain: OperatorChain,
         comparison: Comparision,
         rhs: Item,
     },
@@ -190,20 +239,29 @@ impl Pattern {
                 }
             }
             Pattern::OperatorComparison {
-                operator,
-                mid,
+                operator_chain,
                 comparison,
                 rhs,
             } => {
-                let (value, mid) = (value.clone(), mid.resolve(bindings)?.clone());
+                let mut operator_chain = Some(operator_chain);
+                let mut value = value.to_owned();
 
-                let value = match *operator {
-                    ArithOp::Add => value + mid,
-                    ArithOp::Sub => value - mid,
-                    ArithOp::Mul => value * mid,
-                    ArithOp::Div => value / mid,
-                    ArithOp::Mod => value % mid,
-                }?;
+                while let Some(operator) = operator_chain {
+                    let mid = operator.mid.resolve(bindings)?.clone();
+
+                    value = match operator.operator {
+                        ArithOp::Add => value + mid,
+                        ArithOp::Sub => value - mid,
+                        ArithOp::Mul => value * mid,
+                        ArithOp::Div => value / mid,
+                        ArithOp::Mod => value % mid,
+                    }?;
+
+                    operator_chain = match &operator.next {
+                        Some(next) => Some(&*next),
+                        None => None,
+                    }
+                }
 
                 let rhs = rhs.resolve(bindings)?;
                 let matches = comparison.compare(&value, rhs);
@@ -287,12 +345,8 @@ impl Pattern {
                 bindings
             }
             Pattern::Literal(_) => vec![],
-            Pattern::OperatorComparison { mid, rhs, .. } => {
-                let mut bindings = vec![];
-
-                if let Item::Wildcard(name) = mid {
-                    bindings.push(name.to_owned())
-                }
+            Pattern::OperatorComparison { operator_chain, rhs, .. } => {
+                let mut bindings = operator_chain.bindings(vec![]);
 
                 if let Item::Wildcard(name) = rhs {
                     bindings.push(name.to_owned())
@@ -486,20 +540,11 @@ impl From<parser::Pattern> for Pattern {
             },
             parser::Pattern::Literal(token) => Pattern::Literal(token.into()),
             parser::Pattern::OperatorComparison {
-                operator,
-                mid,
+                operator_chain,
                 comparison,
                 rhs,
             } => {
-                let operator = match operator.kind() {
-                    TokenType::Plus => ArithOp::Add,
-                    TokenType::Minus => ArithOp::Sub,
-                    TokenType::Star => ArithOp::Mul,
-                    TokenType::Slash => ArithOp::Div,
-                    TokenType::Mod => ArithOp::Mod,
-                    _ => internal_error!("parsed token '{:?}' as operator", operator),
-                };
-                let mid = mid.into();
+                let operator_chain = operator_chain.into();
                 let comparison = match comparison.kind() {
                     TokenType::EqualEqual => Comparision::Equal,
                     TokenType::BangEqual => Comparision::NotEqual,
@@ -511,8 +556,7 @@ impl From<parser::Pattern> for Pattern {
                 };
                 let rhs = rhs.into();
                 Pattern::OperatorComparison {
-                    operator,
-                    mid,
+                    operator_chain,
                     comparison,
                     rhs,
                 }

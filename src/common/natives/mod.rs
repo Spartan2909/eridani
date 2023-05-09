@@ -80,7 +80,7 @@ mod feature_std {
                     .unwrap_or(&buf)
                     .to_string();
                 Ok(Value::String(input))
-            },
+            }
             Err(_) => Err(ArgumentError::new("Failed to read from stdin")),
         }
     }
@@ -112,5 +112,5 @@ pub const NATIVES: [(&str, NativeFunction); 5] = [
     ("index", basic::index),
     ("number", basic::number),
     ("string", basic::string),
-    ("input", feature_std::input)
+    ("input", feature_std::input),
 ];

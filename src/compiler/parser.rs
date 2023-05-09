@@ -80,6 +80,43 @@ impl NamedPattern {
 }
 
 #[derive(Debug, Clone)]
+pub struct OperatorChain {
+    operator: Token,
+    mid: Token,
+    next: Option<Box<OperatorChain>>,
+}
+
+impl OperatorChain {
+    fn push(&mut self, operator: Token, mid: Token) {
+        if let Some(next) = &mut self.next {
+            next.push(operator, mid);
+        } else {
+            self.next = Some(Box::new(OperatorChain {
+                operator,
+                mid,
+                next: None,
+            }));
+        }
+    }
+
+    pub(crate) fn operator(&self) -> &Token {
+        &self.operator
+    }
+
+    pub(crate) fn mid(&self) -> &Token {
+        &self.mid
+    }
+
+    pub(crate) fn next(&self) -> Option<&OperatorChain> {
+        if let Some(next) = &self.next {
+            Some(&*next)
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub enum Pattern {
     Binary {
         left: Box<Pattern>,
@@ -96,8 +133,7 @@ pub enum Pattern {
     },
     Literal(Token),
     OperatorComparison {
-        operator: Token,
-        mid: Token,
+        operator_chain: OperatorChain,
         comparison: Token,
         rhs: Token,
     },
@@ -487,16 +523,43 @@ impl Parser {
             TokenType::Slash,
             TokenType::Mod
         ) {
-            let operator = self.previous().clone();
-            let mid = self.consume_any(
-                vec![
-                    TokenType::Number,
-                    TokenType::String,
-                    TokenType::Nothing,
-                    TokenType::Identifier,
-                ],
-                "Expect literal or identifer after operator",
-            )?;
+            let mut operator_chain = OperatorChain {
+                operator: self.previous().clone(),
+                mid: self.consume_any(
+                    vec![
+                        TokenType::Number,
+                        TokenType::String,
+                        TokenType::Nothing,
+                        TokenType::Identifier,
+                    ],
+                    "Expect literal or identifer after operator",
+                )?,
+                next: None,
+            };
+
+            while match_token!(
+                self,
+                true,
+                TokenType::Plus,
+                TokenType::Minus,
+                TokenType::Star,
+                TokenType::Slash,
+                TokenType::Mod
+            ) {
+                let operator = self.previous().clone();
+
+                let mid = self.consume_any(
+                    vec![
+                        TokenType::Number,
+                        TokenType::String,
+                        TokenType::Nothing,
+                        TokenType::Identifier,
+                    ],
+                    "Expect literal or identifer after operator",
+                )?;
+
+                operator_chain.push(operator, mid);
+            }
             let comparison = self.consume_any(
                 vec![
                     TokenType::BangEqual,
@@ -519,8 +582,7 @@ impl Parser {
             )?;
 
             Ok(Pattern::OperatorComparison {
-                operator,
-                mid,
+                operator_chain,
                 comparison,
                 rhs,
             })

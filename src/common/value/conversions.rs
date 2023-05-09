@@ -16,7 +16,7 @@ impl From<&Token> for Value {
                 let mut string = value.lexeme()[1..].to_string();
                 string.pop();
                 Value::String(string)
-            },
+            }
             _ => internal_error!("parsed token {:?} as literal", value),
         }
     }
