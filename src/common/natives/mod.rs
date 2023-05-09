@@ -27,14 +27,33 @@ mod basic {
 
         Ok(list.get(index).into())
     }
+
+    pub fn number(args: &[Value]) -> Result<Value, ArgumentError> {
+        let value = get(args, 0)?;
+        match &value {
+            Value::Number(_) => Ok(value),
+            Value::String(s) if let Ok(n) = s.parse() => Ok(Value::Number(n)),
+            _ => {
+                let description = format!("Invalid base for number: {value}");
+                Err(ArgumentError::new(&description))
+            }
+        }
+    }
+
+    pub fn string(args: &[Value]) -> Result<Value, ArgumentError> {
+        let value = get(args, 0)?;
+        Ok(Value::String(format!("{value}")))
+    }
 }
 
 #[cfg(feature = "std")]
 mod feature_std {
     use crate::{
-        common::{get, value::Value, ArgumentError},
+        common::{get, get_string, value::Value, ArgumentError},
         prelude::*,
     };
+
+    use std::io::{self, Write};
 
     pub fn print(args: &[Value]) -> Result<Value, ArgumentError> {
         let item = get(args, 0)?;
@@ -45,6 +64,19 @@ mod feature_std {
         println!("{}", item);
         Ok(Value::Nothing)
     }
+
+    pub fn input(args: &[Value]) -> Result<Value, ArgumentError> {
+        let prompt = get_string(args, 0)?;
+        print!("{prompt}");
+
+        let _ = io::stdout().flush();
+
+        let mut buf = String::new();
+        match io::stdin().read_line(&mut buf) {
+            Ok(_) => Ok(Value::String(buf)),
+            Err(_) => Err(ArgumentError::new("Failed to read from stdin")),
+        }
+    }
 }
 
 #[cfg(not(feature = "std"))]
@@ -52,6 +84,10 @@ mod feature_std {
     use crate::common::{value::Value, ArgumentError};
 
     pub fn print(args: &[Value]) -> Result<Value, ArgumentError> {
+        unimplemented!()
+    }
+
+    pub fn input(args: &[Value]) -> Result<Value, ArgumentError> {
         unimplemented!()
     }
 }
@@ -64,5 +100,10 @@ mod feature_web {}
 
 type NativeFunction = fn(&[Value]) -> Result<Value, ArgumentError>;
 
-pub const NATIVES: [(&str, NativeFunction); 2] =
-    [("print", feature_std::print), ("index", basic::index)];
+pub const NATIVES: [(&str, NativeFunction); 5] = [
+    ("print", feature_std::print),
+    ("index", basic::index),
+    ("number", basic::number),
+    ("string", basic::string),
+    ("input", feature_std::input)
+];

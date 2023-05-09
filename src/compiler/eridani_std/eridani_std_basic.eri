@@ -3,3 +3,17 @@ index is (value: List, index: Integer) something(index in internals(value, index
 index_or_nothing is (value: List, index: Integer) index in internals(value, index)
 
 something is (value: != nothing) value
+
+greater is
+    (a: >= b, b: Number) a
+
+    (a: Number, b: Number) b
+
+lower is
+    (a: <= b, b: Number) a
+
+    (a: Number, b: Number) b
+
+number is (value) number in internals(value)
+
+string is (value) string in internals(value)

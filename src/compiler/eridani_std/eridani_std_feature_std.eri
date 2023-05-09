@@ -1,1 +1,6 @@
 print is (value) print in internals(value)
+
+input is
+    () input in internals("")
+
+    (prompt: String) input in internals(prompt)

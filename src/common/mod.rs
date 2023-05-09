@@ -29,6 +29,17 @@ pub fn get(args: &[Value], index: usize) -> Result<Value, ArgumentError> {
     }
 }
 
+pub fn get_string(args: &[Value], index: usize) -> Result<String, ArgumentError> {
+    let value = get(args, index)?;
+    match value {
+        Value::String(s) => Ok(s),
+        _ => {
+            let description = format!("Expected a string, found '{value}'");
+            Err(ArgumentError::new(&description))
+        }
+    }
+}
+
 pub trait EridaniFunction: Fn(&[Value]) -> Result<Value, ArgumentError> {
     fn clone_box<'a>(&self) -> Box<dyn 'a + EridaniFunction>
     where
