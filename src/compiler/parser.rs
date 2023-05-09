@@ -804,7 +804,12 @@ impl Parser {
         if !self.check_token(TokenType::RightParen, 0) {
             loop {
                 if arguments.len() >= 255 {
-                    todo!("error: too many arguments");
+                    return Err(Error::new(
+                        self.peek(0).unwrap().line(),
+                        "Argument",
+                        "",
+                        "Too many arguments",
+                    ));
                 }
 
                 arguments.push(self.expression()?);
