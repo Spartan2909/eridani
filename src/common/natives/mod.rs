@@ -76,7 +76,7 @@ mod feature_std {
             Ok(_) => {
                 let input = buf
                     .strip_suffix("\r\n")
-                    .or(buf.strip_suffix("\n"))
+                    .or(buf.strip_suffix('\n'))
                     .unwrap_or(&buf)
                     .to_string();
                 Ok(Value::String(input))

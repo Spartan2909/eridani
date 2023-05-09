@@ -120,11 +120,7 @@ impl From<&parser::OperatorChain> for OperatorChain {
 
         let mid: Item = value.mid().into();
 
-        let next = if let Some(next) = value.next() {
-            Some(Box::new(next.into()))
-        } else {
-            None
-        };
+        let next = value.next().map(|next| Box::new(next.into()));
 
         OperatorChain { operator, mid, next }
     }
@@ -258,7 +254,7 @@ impl Pattern {
                     }?;
 
                     operator_chain = match &operator.next {
-                        Some(next) => Some(&*next),
+                        Some(next) => Some(next),
                         None => None,
                     }
                 }

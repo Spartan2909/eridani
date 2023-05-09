@@ -109,7 +109,7 @@ impl OperatorChain {
 
     pub(crate) fn next(&self) -> Option<&OperatorChain> {
         if let Some(next) = &self.next {
-            Some(&*next)
+            Some(next)
         } else {
             None
         }
