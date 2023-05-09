@@ -1,5 +1,8 @@
 use std::{fs, process::ExitCode};
 
+#[cfg(debug_assertions)]
+use std::time::Instant;
+
 use clap::Parser;
 
 #[derive(Parser)]
@@ -33,6 +36,9 @@ fn main() -> ExitCode {
         fs::canonicalize(&args.file_path).expect("Should have been able to read the file");
     let contents = fs::read_to_string(&file_path).expect("Should have been able to read the file");
 
+    #[cfg(debug_assertions)]
+    let start = Instant::now();
+
     let program = match eridani::parse(&contents, file_path.to_str(), &entry_point) {
         Ok(tree) => tree,
         Err(e) => {
@@ -52,6 +58,9 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     }
+
+    #[cfg(debug_assertions)]
+    println!("time taken: {}ms", start.elapsed().as_millis());
 
     ExitCode::SUCCESS
 }

@@ -37,7 +37,12 @@ mod feature_std {
     };
 
     pub fn print(args: &[Value]) -> Result<Value, ArgumentError> {
-        println!("{}", get(args, 0)?);
+        let item = get(args, 0)?;
+
+        #[cfg(debug_assertions)]
+        print!("<stdout> ");
+
+        println!("{}", item);
         Ok(Value::Nothing)
     }
 }

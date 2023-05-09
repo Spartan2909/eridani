@@ -489,8 +489,13 @@ impl Parser {
         ) {
             let operator = self.previous().clone();
             let mid = self.consume_any(
-                vec![TokenType::Number, TokenType::String],
-                "Expect literal after operator",
+                vec![
+                    TokenType::Number,
+                    TokenType::String,
+                    TokenType::Nothing,
+                    TokenType::Identifier,
+                ],
+                "Expect literal or identifer after operator",
             )?;
             let comparison = self.consume_any(
                 vec![
@@ -504,8 +509,13 @@ impl Parser {
                 "Expect comparison",
             )?;
             let rhs = self.consume_any(
-                vec![TokenType::Number, TokenType::String],
-                "Expect literal after comparison",
+                vec![
+                    TokenType::Number,
+                    TokenType::String,
+                    TokenType::Nothing,
+                    TokenType::Identifier,
+                ],
+                "Expect literal or identifier after comparison",
             )?;
 
             Ok(Pattern::OperatorComparison {
@@ -532,8 +542,13 @@ impl Parser {
         ) {
             let comparison = self.previous().clone();
             let rhs = self.consume_any(
-                vec![TokenType::Number, TokenType::String, TokenType::Nothing],
-                "Expect literal after comparison",
+                vec![
+                    TokenType::Number,
+                    TokenType::String,
+                    TokenType::Nothing,
+                    TokenType::Identifier,
+                ],
+                "Expect literal or identifier after comparison",
             )?;
 
             Ok(Pattern::Comparision { comparison, rhs })

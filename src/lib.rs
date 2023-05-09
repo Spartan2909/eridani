@@ -1,4 +1,4 @@
-#![feature(fs_try_exists, let_chains, test, try_blocks)]
+#![feature(fs_try_exists, let_chains, test, try_blocks, variant_count)]
 #![cfg_attr(not(feature = "std"), no_std, feature(error_in_core))]
 #![warn(
     clippy::cast_lossless,

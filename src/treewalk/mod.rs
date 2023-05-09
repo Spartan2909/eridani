@@ -6,7 +6,7 @@ use crate::{
 };
 
 use alloc::{collections::BTreeMap, rc::Rc};
-use core::cell::RefCell;
+use core::{cell::RefCell, cmp::Ordering, result};
 
 fn expr(
     expression: Expr,
@@ -63,7 +63,17 @@ fn expr(
                     function(fun, &arguments, &name, line).init_or_add_context(function_name, line)
                 }
                 Value::Method(method) => {
-                    let mut internal_bindings = match match_args(method.args(), &arguments) {
+                    let matches = match match_args(method.args(), &arguments) {
+                        Ok(value) => value,
+                        Err(_) => {
+                            return Err(Error::new(
+                                "Pattern",
+                                "Circular dependencies in method arguments",
+                                line,
+                            ))
+                        }
+                    };
+                    let mut internal_bindings = match matches {
                         Some(bindings) => bindings,
                         None => {
                             let message =
@@ -156,14 +166,30 @@ fn function(
         return native_function(native, function.borrow().name(), args);
     }
 
-    let mut matches: Vec<_> = function
+    let matches: result::Result<Vec<_>, _> = function
         .borrow()
         .methods()
         .iter()
+        .map(|method| match_args(method.borrow().args(), args))
+        .collect();
+
+    let matches = match matches {
+        Ok(value) => value,
+        Err(_) => {
+            return Err(Error::new(
+                "Pattern",
+                "Circular dependencies in method arguments",
+                line,
+            ))
+        }
+    };
+
+    let mut matches: Vec<_> = matches
+        .iter()
         .enumerate()
-        .flat_map(|(i, method)| {
-            match_args(method.borrow().args(), args).map(|bindings| (i, bindings))
-        })
+        .map(|(i, bindings)| (i, bindings.to_owned()))
+        .filter(|(_, bindings)| bindings.is_some())
+        .map(|(i, bindings)| (i, bindings.unwrap()))
         .collect();
 
     if matches.is_empty() {
@@ -174,16 +200,51 @@ fn function(
         );
         Err(Error::new("Match", &message, line)).extend_trace(function_name, line)
     } else if matches.len() == 1 {
+        let (function_index, bindings) = &mut matches[0];
         expr(
-            function.borrow().methods()[matches[0].0]
+            function.borrow().methods()[*function_index]
                 .borrow()
                 .body()
                 .to_owned(),
-            &mut matches[0].1,
+            bindings,
             function.borrow().name(),
         )
     } else {
-        todo!()
+        let precedences: Vec<_> = matches
+            .iter()
+            .map(|(index, bindings)| {
+                function.borrow().methods()[*index].borrow().precedence(
+                    &bindings
+                        .iter()
+                        .map(|(a, _)| Some(a.to_owned()))
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .collect();
+
+        let mut min_precedence = precedences[0];
+        let mut min_index = 0;
+
+        for (i, precedence) in precedences[1..].iter().enumerate() {
+            match precedence.cmp(&min_precedence) {
+                Ordering::Less => {
+                    min_precedence = *precedence;
+                    min_index = i;
+                }
+                Ordering::Equal => return Err(Error::new("Match", "Method collision", line)),
+                _ => {}
+            }
+        }
+
+        let (function_index, bindings) = &mut matches[min_index];
+        expr(
+            function.borrow().methods()[*function_index]
+                .borrow()
+                .body()
+                .to_owned(),
+            bindings,
+            function.borrow().name(),
+        )
     }
 }
 

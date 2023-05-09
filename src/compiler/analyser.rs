@@ -172,6 +172,13 @@ impl Method {
     pub fn body(&self) -> &Expr {
         &self.body
     }
+
+    pub fn precedence(&self, bindings: &[Option<String>]) -> i32 {
+        self.args
+            .iter()
+            .map(|(_, pattern)| pattern)
+            .fold(0, |a, b| a + b.precedence(bindings))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

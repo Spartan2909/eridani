@@ -3,5 +3,13 @@ module fib
 unused is
     () unused()
 
+greater is
+    (a: > b, b: Integer) 1
+
+    (a, b) 0
+
 main is
-    () print(fibonacci in fib(5))
+    () do
+        print(fibonacci in fib(10))
+        print(greater(3, 2))
+    end

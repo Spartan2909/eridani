@@ -5,14 +5,8 @@ use crate::compiler::{
     scanner::{Token, TokenType},
 };
 
-#[cfg(feature = "no_std")]
+#[cfg(not(feature = "std"))]
 use crate::prelude::*;
-
-impl From<Token> for Value {
-    fn from(value: Token) -> Self {
-        (&value).into()
-    }
-}
 
 impl From<&Token> for Value {
     fn from(value: &Token) -> Self {
@@ -27,6 +21,28 @@ impl From<&Token> for Value {
             TokenType::String => Value::String(value.lexeme().to_string()),
             _ => internal_error!("parsed token {:?} as literal", value),
         }
+    }
+}
+
+impl From<Token> for Value {
+    fn from(value: Token) -> Self {
+        (&value).into()
+    }
+}
+
+impl From<&Token> for Item {
+    fn from(value: &Token) -> Self {
+        match value.kind() {
+            TokenType::Identifier => Item::Wildcard(value.lexeme().to_owned()),
+            TokenType::Nothing | TokenType::Number | TokenType::String => Item::Value(value.into()),
+            _ => internal_error!("parsed token {:?} as literal or identifier", value),
+        }
+    }
+}
+
+impl From<Token> for Item {
+    fn from(value: Token) -> Self {
+        (&value).into()
     }
 }
 

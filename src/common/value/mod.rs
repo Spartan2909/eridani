@@ -4,7 +4,7 @@ use alloc::{collections::BTreeMap, rc::Rc};
 use core::{
     cell::RefCell,
     cmp::Ordering,
-    fmt,
+    fmt, mem,
     ops::{Add, Div, Mul, Neg, Rem, Sub},
 };
 
@@ -291,6 +291,21 @@ pub enum UnOp {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum Item {
+    Value(Value),
+    Wildcard(String),
+}
+
+impl Item {
+    fn resolve<'a>(&'a self, bindings: &'a BTreeMap<String, Value>) -> Option<&'a Value> {
+        match self {
+            Item::Value(value) => Some(value),
+            Item::Wildcard(name) => bindings.get(name),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Pattern {
     Binary {
         left: Box<Pattern>,
@@ -299,7 +314,7 @@ pub enum Pattern {
     },
     Comparision {
         comparison: Comparision,
-        rhs: Value,
+        rhs: Item,
     },
     List {
         left: Box<Pattern>,
@@ -308,9 +323,9 @@ pub enum Pattern {
     Literal(Value),
     OperatorComparison {
         operator: ArithOp,
-        mid: Value,
+        mid: Item,
         comparison: Comparision,
-        rhs: Value,
+        rhs: Item,
     },
     Range {
         lower: Value,
@@ -323,6 +338,22 @@ pub enum Pattern {
         right: Box<Pattern>,
     },
     Wildcard(Option<String>),
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum PatternPrecedence {
+    Wildcard = 10,
+    Type = 20,
+    Comparision = 30,
+    Range = 40,
+    Literal = 50,
+}
+
+impl From<PatternPrecedence> for i32 {
+    fn from(value: PatternPrecedence) -> Self {
+        unsafe { mem::transmute::<_, u8>(value) }.into()
+    }
 }
 
 impl Pattern {
@@ -348,6 +379,7 @@ impl Pattern {
                 }
             }
             Pattern::Comparision { comparison, rhs } => {
+                let rhs = rhs.resolve(bindings)?;
                 let matches = comparison.compare(value, rhs);
 
                 if matches {
@@ -382,7 +414,7 @@ impl Pattern {
                 comparison,
                 rhs,
             } => {
-                let (value, mid) = (value.clone(), mid.clone());
+                let (value, mid) = (value.clone(), mid.resolve(bindings)?.clone());
 
                 let value = match *operator {
                     ArithOp::Add => value + mid,
@@ -392,6 +424,7 @@ impl Pattern {
                     ArithOp::Mod => value % mid,
                 }?;
 
+                let rhs = rhs.resolve(bindings)?;
                 let matches = comparison.compare(&value, rhs);
 
                 if matches {
@@ -460,14 +493,32 @@ impl Pattern {
                 bindings.extend(right.bindings());
                 bindings
             }
-            Pattern::Comparision { .. } => vec![],
+            Pattern::Comparision { rhs, .. } => {
+                if let Item::Wildcard(name) = rhs {
+                    vec![name.to_owned()]
+                } else {
+                    vec![]
+                }
+            }
             Pattern::List { left, right } => {
                 let mut bindings = left.bindings();
                 bindings.extend(right.bindings());
                 bindings
             }
             Pattern::Literal(_) => vec![],
-            Pattern::OperatorComparison { .. } => vec![],
+            Pattern::OperatorComparison { mid, rhs, .. } => {
+                let mut bindings = vec![];
+
+                if let Item::Wildcard(name) = mid {
+                    bindings.push(name.to_owned())
+                }
+
+                if let Item::Wildcard(name) = rhs {
+                    bindings.push(name.to_owned())
+                }
+
+                bindings
+            }
             Pattern::Range { .. } => vec![],
             Pattern::Type(_) => vec![],
             Pattern::Unary { right, .. } => right.bindings(),
@@ -481,160 +532,41 @@ impl Pattern {
         }
     }
 
-    pub fn compare_specicifity(&self, other: &Pattern, bindings: &[Option<String>]) -> Ordering {
+    pub fn precedence(&self, bindings: &[Option<String>]) -> i32 {
         match self {
             Pattern::Binary {
                 left,
                 operator,
                 right,
             } => {
+                let left = left.precedence(bindings);
+                let right = right.precedence(bindings);
                 if *operator == LogOp::And {
-                    let most_specific =
-                        if left.compare_specicifity(right, bindings) == Ordering::Greater {
-                            left
-                        } else {
-                            right
-                        };
+                    let highest = if left > right { left } else { right };
 
-                    let mut comparison = most_specific.compare_specicifity(other, bindings);
-                    if comparison == Ordering::Equal {
-                        comparison = Ordering::Greater
-                    }
-
-                    comparison
+                    highest + 1
                 } else {
-                    let least_specific =
-                        if left.compare_specicifity(right, bindings) == Ordering::Less {
-                            left
-                        } else {
-                            right
-                        };
+                    let lowest = if left < right { left } else { right };
 
-                    let mut comparison = least_specific.compare_specicifity(other, bindings);
-                    if comparison == Ordering::Equal {
-                        comparison = Ordering::Less
-                    }
-
-                    comparison
+                    lowest - 1
                 }
             }
-            Pattern::Comparision { .. } => {
-                if let Pattern::Comparision { .. } = other {
-                    Ordering::Equal
-                } else if other.is_type() || other.is_wildcard(bindings) {
-                    Ordering::Greater
-                } else if other.is_binary() {
-                    other.compare_specicifity(self, bindings).reverse()
-                } else {
-                    Ordering::Less
-                }
+            Pattern::Comparision { .. } => PatternPrecedence::Comparision.into(),
+            Pattern::List { left, right } => {
+                (left.precedence(bindings) + right.precedence(bindings)) / 2
             }
-            Pattern::List {
-                left: left1,
-                right: right1,
-            } => {
-                if let Pattern::List {
-                    left: left2,
-                    right: right2,
-                } = other
-                {
-                    let left_comp = left1.compare_specicifity(left2, bindings);
-                    let right_comp = right1.compare_specicifity(right2, bindings);
-
-                    if left_comp == right_comp {
-                        left_comp
-                    } else {
-                        Ordering::Equal
-                    }
-                } else if other.is_literal(bindings) {
-                    Ordering::Less
-                } else if other.is_binary() {
-                    other.compare_specicifity(self, bindings).reverse()
-                } else {
-                    Ordering::Greater
-                }
+            Pattern::Literal(_) => PatternPrecedence::Literal.into(),
+            Pattern::OperatorComparison { .. } => PatternPrecedence::Comparision.into(),
+            Pattern::Range { .. } => PatternPrecedence::Range.into(),
+            Pattern::Type(_) => PatternPrecedence::Type.into(),
+            Pattern::Unary { right, .. } => {
+                mem::variant_count::<PatternPrecedence>() as i32 * 10 - right.precedence(bindings)
             }
-            Pattern::Literal(_) => {
-                if other.is_literal(bindings) {
-                    Ordering::Equal
-                } else if other.is_binary() {
-                    other.compare_specicifity(self, bindings).reverse()
-                } else {
-                    Ordering::Greater
-                }
-            }
-            Pattern::OperatorComparison { .. } => {
-                if other.is_operator_comparison() {
-                    Ordering::Equal
-                } else if other.is_binary() {
-                    other.compare_specicifity(self, bindings).reverse()
-                } else if other.is_comparison() || other.is_type() || other.is_wildcard(bindings) {
-                    Ordering::Greater
-                } else {
-                    Ordering::Less
-                }
-            }
-            Pattern::Range {
-                lower: lower1,
-                upper: upper1,
-                inclusive: inclusive1,
-            } => {
-                if let Pattern::Range {
-                    lower: lower2,
-                    upper: upper2,
-                    inclusive: inclusive2,
-                } = other
-                {
-                    let lower1 = lower1.expect_number();
-                    let upper1 = upper1.expect_number();
-                    let difference1 = if *inclusive1 {
-                        upper1 - lower1 + 1.0
-                    } else {
-                        upper1 - lower1
-                    };
-
-                    let lower2 = lower2.expect_number();
-                    let upper2 = upper2.expect_number();
-                    let difference2 = if *inclusive2 {
-                        upper2 - lower2 + 1.0
-                    } else {
-                        upper2 - lower2
-                    };
-
-                    if let Some(cmp) = difference1.partial_cmp(&difference2) {
-                        cmp
-                    } else {
-                        internal_error!("NaN in range")
-                    }
-                } else if other.is_binary() {
-                    other.compare_specicifity(self, bindings).reverse()
-                } else if other.is_literal(bindings) || other.is_list() {
-                    Ordering::Less
-                } else {
-                    Ordering::Greater
-                }
-            }
-            Pattern::Type(_) => {
-                if other.is_type() {
-                    Ordering::Equal
-                } else if other.is_binary() {
-                    other.compare_specicifity(self, bindings).reverse()
-                } else if other.is_wildcard(bindings) {
-                    Ordering::Greater
-                } else {
-                    Ordering::Less
-                }
-            }
-            Pattern::Unary { operator, right } => match *operator {
-                UnOp::Not => right.compare_specicifity(other, bindings).reverse(),
-            },
             Pattern::Wildcard(name) => {
                 if bindings.contains(name) {
-                    Pattern::Literal(Value::Nothing).compare_specicifity(other, bindings)
-                } else if other.is_wildcard(bindings) {
-                    Ordering::Equal
+                    PatternPrecedence::Literal.into()
                 } else {
-                    Ordering::Less
+                    PatternPrecedence::Wildcard.into()
                 }
             }
         }
