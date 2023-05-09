@@ -122,7 +122,11 @@ impl From<&parser::OperatorChain> for OperatorChain {
 
         let next = value.next().map(|next| Box::new(next.into()));
 
-        OperatorChain { operator, mid, next }
+        OperatorChain {
+            operator,
+            mid,
+            next,
+        }
     }
 }
 
@@ -341,7 +345,11 @@ impl Pattern {
                 bindings
             }
             Pattern::Literal(_) => vec![],
-            Pattern::OperatorComparison { operator_chain, rhs, .. } => {
+            Pattern::OperatorComparison {
+                operator_chain,
+                rhs,
+                ..
+            } => {
                 let mut bindings = operator_chain.bindings(vec![]);
 
                 if let Item::Wildcard(name) = rhs {
