@@ -220,7 +220,7 @@ impl Value {
         }
     }
 
-    pub fn expect_number(&self) -> f64 {
+    pub(crate) fn expect_number(&self) -> f64 {
         if let Some(n) = self.number() {
             n
         } else {

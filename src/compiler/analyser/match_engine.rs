@@ -105,7 +105,7 @@ fn resolve_metapatterns(
     Ok(result)
 }
 
-pub fn match_args(
+pub(crate) fn match_args(
     patterns: &[(Option<u16>, Pattern)],
     args: &[Value],
     mut variables: Vec<Value>,

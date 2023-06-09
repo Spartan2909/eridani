@@ -1,7 +1,7 @@
 mod match_engine;
 mod pattern;
 
-pub use match_engine::match_args;
+pub(crate) use match_engine::match_args;
 
 use crate::{
     common::{internal_error, natives, value::Value, EridaniFunction},
@@ -31,7 +31,7 @@ enum FunctionKind {
     Rust,
 }
 
-pub enum Function {
+pub(crate) enum Function {
     Eridani {
         name: String,
         methods: Vec<RefCell<Method>>,
@@ -199,7 +199,7 @@ impl Drop for Program {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Method {
+pub(crate) struct Method {
     args: Vec<(Option<u16>, Pattern)>,
     body: Expr,
     environment: Box<Environment>,
@@ -320,7 +320,7 @@ impl Environment {
 }
 
 #[derive(Clone, PartialEq)]
-pub enum Expr {
+pub(crate) enum Expr {
     Binary {
         left: Box<Self>,
         operator: BinOp,

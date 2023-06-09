@@ -162,7 +162,7 @@ impl Variable {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Pattern {
+pub(crate) enum Pattern {
     Binary {
         left: Box<Pattern>,
         operator: LogOp,
