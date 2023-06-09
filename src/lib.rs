@@ -52,8 +52,6 @@ pub use compiler::parse;
 #[cfg(feature = "runtime")]
 mod runtime;
 
-#[cfg(feature = "tree_walk")]
-mod treewalk;
 
 #[cfg(feature = "tree_walk")]
 pub use runtime::treewalk::walk_tree;
