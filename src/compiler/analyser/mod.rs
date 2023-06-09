@@ -31,7 +31,7 @@ enum FunctionKind {
     Rust,
 }
 
-pub(crate) enum Function {
+pub enum Function {
     Eridani {
         name: String,
         methods: Vec<RefCell<Method>>,
@@ -199,18 +199,18 @@ impl Drop for Program {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Method {
+pub struct Method {
     args: Vec<(Option<u16>, Pattern)>,
     body: Expr,
     environment: Box<Environment>,
 }
 
 impl Method {
-    pub fn args(&self) -> &Vec<(Option<u16>, Pattern)> {
+    pub(crate) fn args(&self) -> &Vec<(Option<u16>, Pattern)> {
         &self.args
     }
 
-    pub fn body(&self) -> &Expr {
+    pub(crate) fn body(&self) -> &Expr {
         &self.body
     }
 
