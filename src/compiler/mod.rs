@@ -62,7 +62,7 @@ impl Error {
 pub type Result<T> = result::Result<T, Error>;
 
 #[cfg(feature = "tree_walk")]
-pub use analyser::{Function, Program};
+pub(crate) use analyser::{Function, Program};
 
 #[cfg(feature = "tree_walk")]
 pub fn parse(source: &str, source_origin: Option<&str>, entry_point: &str) -> Result<Program> {
