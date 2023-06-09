@@ -2,7 +2,7 @@ use crate::{common::value::Value, compiler::analyser::pattern::Pattern, prelude:
 
 use core::cell::RefCell;
 
-use alloc::{collections::BTreeMap, rc::Rc};
+use alloc::rc::Rc;
 
 #[derive(Debug, Clone)]
 struct Dependency {
@@ -28,15 +28,16 @@ fn is_superset<T: PartialEq>(superset: &[T], subset: &[T]) -> bool {
 }
 
 fn resolve_metapatterns(
-    patterns: &[(Option<String>, Pattern)],
-    names: &[String],
+    patterns: &[(Option<u16>, Pattern)],
+    names: &[u16],
 ) -> Result<Vec<usize>, ()> {
     let mut dependency_indexes = vec![];
-    for (_, pattern) in patterns {
+    for (_, pattern) in patterns.iter() {
         let mut pattern_dependencies = vec![];
 
-        for binding in pattern.bindings() {
-            if let Some(position) = names.iter().position(|x| x == &binding) {
+        let references = pattern.references();
+        for reference in references {
+            if let Some(position) = names.iter().position(|x| x == &reference) {
                 pattern_dependencies.push(position);
             }
         }
@@ -90,46 +91,49 @@ fn resolve_metapatterns(
         }
     }
 
+    let result = ordered_dependencies
+        .iter()
+        .map(|dep| dep.borrow().pattern_index)
+        .collect();
+
     // Prevent memory leaks
-    for dependency in dependencies {
+    for dependency in ordered_dependencies {
         dependency.borrow_mut().depends_on_this = vec![];
         dependency.borrow_mut().dependencies = vec![];
     }
 
-    Ok(ordered_dependencies
-        .iter()
-        .map(|dep| dep.borrow().pattern_index)
-        .collect())
+    Ok(result)
 }
 
 pub fn match_args(
-    patterns: &[(Option<String>, Pattern)],
+    patterns: &[(Option<u16>, Pattern)],
     args: &[Value],
-) -> Result<Option<BTreeMap<String, Value>>, ()> {
+    mut variables: Vec<Value>,
+) -> Result<Option<Vec<Value>>, ()> {
     if patterns.len() != args.len() {
         return Ok(None);
     }
 
-    let names: Vec<String> = patterns
+    let names: Vec<u16> = patterns
         .iter()
-        .filter_map(|(name, _)| name.clone())
+        .filter_map(|(name, _)| *name)
         .collect();
 
-    let order = resolve_metapatterns(patterns, &names).unwrap();
+    let order = resolve_metapatterns(patterns, &names)?;
 
-    let mut bindings = BTreeMap::new();
-
-    let args: Vec<_> = args.iter().zip(patterns).collect();
+    let mut args: Vec<_> = args.iter().zip(patterns).collect();
     for index in order {
-        let (value, (name, pattern)) = args.get(index).unwrap();
-        if pattern.matches(value, &mut bindings).is_none() {
+        let (value, (name, pattern)) = &mut args[index];
+        variables = if let Some(variables) = pattern.matches(value, variables) {
+            variables
+        } else {
             return Ok(None);
-        }
+        };
 
-        if let Some(name) = name {
-            bindings.insert(name.to_owned(), (*value).to_owned());
+        if name.is_some() {
+            variables.push(value.to_owned());
         }
     }
 
-    Ok(Some(bindings))
+    Ok(Some(variables))
 }

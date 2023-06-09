@@ -8,6 +8,9 @@ use std::error;
 
 use crate::{common::ArgumentError, prelude::*};
 
+#[cfg(feature = "tree_walk")]
+pub(crate) mod treewalk;
+
 #[derive(Debug, Clone)]
 pub enum ErrorInner {
     Argument(ArgumentError),
@@ -51,7 +54,7 @@ impl Error {
             }
         }
 
-        self.trace.push((function_name.to_owned(), line, 1))
+        self.trace.push((function_name.to_owned(), line, 1));
     }
 }
 

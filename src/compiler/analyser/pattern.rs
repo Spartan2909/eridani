@@ -1,14 +1,14 @@
 use crate::{
     common::{internal_error, value::Value},
     compiler::{
+        analyser::Environment,
         parser,
         scanner::{Token, TokenType},
     },
     prelude::*,
 };
 
-use alloc::collections::BTreeMap;
-use core::mem;
+use strum::EnumCount;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Type {
@@ -74,14 +74,14 @@ pub enum UnOp {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Item {
     Value(Value),
-    Wildcard(String),
+    Wildcard(Variable),
 }
 
 impl Item {
-    fn resolve<'a>(&'a self, bindings: &'a BTreeMap<String, Value>) -> Option<&'a Value> {
+    fn resolve<'a>(&'a self, variables: &'a [Value]) -> Option<&'a Value> {
         match self {
             Item::Value(value) => Some(value),
-            Item::Wildcard(name) => bindings.get(name),
+            Item::Wildcard(var) => variables.get(var.reference() as usize),
         }
     }
 }
@@ -94,15 +94,24 @@ pub struct OperatorChain {
 }
 
 impl OperatorChain {
-    fn bindings(&self, mut bindings: Vec<String>) -> Vec<String> {
-        if let Item::Wildcard(name) = &self.mid {
-            bindings.push(name.to_owned());
+    fn bind(&mut self, environment: &mut Environment) {
+        if let Item::Wildcard(Variable::Name(name)) = &self.mid {
+            let reference = environment.get_or_add(name.to_owned());
+            self.mid = Item::Wildcard(Variable::Reference(reference));
+        }
+
+        if let Some(next) = &mut self.next {
+            next.bind(environment);
+        }
+    }
+
+    fn references(&self, references: &mut Vec<u16>) {
+        if let Item::Wildcard(Variable::Reference(reference)) = &self.mid {
+            references.push(*reference);
         }
 
         if let Some(next) = &self.next {
-            next.bindings(bindings)
-        } else {
-            bindings
+            next.references(references);
         }
     }
 }
@@ -137,6 +146,22 @@ impl From<parser::OperatorChain> for OperatorChain {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum Variable {
+    Name(String),
+    Reference(u16),
+}
+
+impl Variable {
+    fn reference(&self) -> u16 {
+        if let Variable::Reference(reference) = self {
+            *reference
+        } else {
+            internal_error!("called 'reference' on a named variable");
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Pattern {
     Binary {
         left: Box<Pattern>,
@@ -167,11 +192,11 @@ pub enum Pattern {
         operator: UnOp,
         right: Box<Pattern>,
     },
-    Wildcard(Option<String>),
+    Wildcard(Option<Variable>),
 }
 
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, EnumCount)]
 enum PatternPrecedence {
     Wildcard = 10,
     Type = 20,
@@ -182,12 +207,12 @@ enum PatternPrecedence {
 
 impl From<PatternPrecedence> for i32 {
     fn from(value: PatternPrecedence) -> Self {
-        unsafe { mem::transmute::<_, u8>(value) }.into()
+        (value as u8).into()
     }
 }
 
 impl Pattern {
-    pub fn matches(&self, value: &Value, bindings: &mut BTreeMap<String, Value>) -> Option<()> {
+    pub fn matches(&self, value: &Value, variables: Vec<Value>) -> Option<Vec<Value>> {
         match self {
             Pattern::Binary {
                 left,
@@ -195,45 +220,45 @@ impl Pattern {
                 right,
             } => {
                 if *operator == LogOp::Or {
-                    let left = left.matches(value, bindings);
-                    let right = right.matches(value, bindings);
+                    let left = left.matches(value, variables.clone());
+                    let right = right.matches(value, variables.clone());
                     if left.is_some() || right.is_some() {
-                        Some(())
+                        Some(variables)
                     } else {
                         None
                     }
                 } else {
-                    left.matches(value, bindings)?;
-                    right.matches(value, bindings)?;
-                    Some(())
+                    let variables = left.matches(value, variables)?;
+                    let variables = right.matches(value, variables)?;
+                    Some(variables)
                 }
             }
             Pattern::Comparision { comparison, rhs } => {
-                let rhs = rhs.resolve(bindings)?;
+                let rhs = rhs.resolve(&variables)?;
                 let matches = comparison.compare(value, rhs);
 
                 if matches {
-                    Some(())
+                    Some(variables)
                 } else {
                     None
                 }
             }
             Pattern::List { left, right } => {
                 if let Value::List(list) = value {
-                    left.matches(value, bindings)?;
+                    let variables = left.matches(value, variables)?;
                     let tail = match list.get(1) {
                         Some(_) => Value::List(list[1..].to_vec()),
                         None => Value::Nothing,
                     };
-                    right.matches(&tail, bindings)?;
-                    Some(())
+                    let variables = right.matches(&tail, variables)?;
+                    Some(variables)
                 } else {
                     None
                 }
             }
             Pattern::Literal(literal) => {
                 if value == literal {
-                    Some(())
+                    Some(variables)
                 } else {
                     None
                 }
@@ -247,7 +272,7 @@ impl Pattern {
                 let mut value = value.to_owned();
 
                 while let Some(operator) = operator_chain {
-                    let mid = operator.mid.resolve(bindings)?.clone();
+                    let mid = operator.mid.resolve(&variables)?.clone();
 
                     value = match operator.operator {
                         ArithOp::Add => value + mid,
@@ -263,11 +288,11 @@ impl Pattern {
                     }
                 }
 
-                let rhs = rhs.resolve(bindings)?;
+                let rhs = rhs.resolve(&variables)?;
                 let matches = comparison.compare(&value, rhs);
 
                 if matches {
-                    Some(())
+                    Some(variables)
                 } else {
                     None
                 }
@@ -288,90 +313,129 @@ impl Pattern {
                 };
 
                 if matches {
-                    Some(())
+                    Some(variables)
                 } else {
                     None
                 }
             }
             Pattern::Type(kind) => {
                 if is_kind(value, *kind) {
-                    Some(())
+                    Some(variables)
                 } else {
                     None
                 }
             }
             Pattern::Unary { operator, right } => match *operator {
                 UnOp::Not => {
-                    if right.matches(value, bindings).is_some() {
+                    if right.matches(value, variables.clone()).is_some() {
                         None
                     } else {
-                        Some(())
+                        Some(variables)
                     }
                 }
             },
             Pattern::Wildcard(label) => {
+                let mut variables = variables;
                 if let Some(label) = label {
-                    if let Some(existing_value) = bindings.get(label) {
+                    if let Some(existing_value) = variables.get(label.reference() as usize) {
                         if value != existing_value {
                             return None;
                         }
                     } else {
-                        bindings.insert(label.clone(), value.clone());
+                        variables.push(value.clone());
                     }
                 }
 
-                Some(())
+                Some(variables)
             }
         }
     }
 
-    pub fn bindings(&self) -> Vec<String> {
+    pub fn bind(&mut self, environment: &mut Environment) {
         match self {
             Pattern::Binary { left, right, .. } => {
-                let mut bindings = left.bindings();
-                bindings.extend(right.bindings());
-                bindings
+                left.bind(environment);
+                right.bind(environment);
             }
             Pattern::Comparision { rhs, .. } => {
-                if let Item::Wildcard(name) = rhs {
-                    vec![name.to_owned()]
-                } else {
-                    vec![]
+                if let Item::Wildcard(Variable::Name(name)) = rhs {
+                    let reference = environment.get_or_add(name.to_owned());
+                    *rhs = Item::Wildcard(Variable::Reference(reference));
                 }
             }
             Pattern::List { left, right } => {
-                let mut bindings = left.bindings();
-                bindings.extend(right.bindings());
-                bindings
+                left.bind(environment);
+                right.bind(environment);
             }
-            Pattern::Literal(_) => vec![],
+            Pattern::Literal(_) => {}
             Pattern::OperatorComparison {
                 operator_chain,
                 rhs,
                 ..
             } => {
-                let mut bindings = operator_chain.bindings(vec![]);
+                operator_chain.bind(environment);
 
-                if let Item::Wildcard(name) = rhs {
-                    bindings.push(name.to_owned())
+                if let Item::Wildcard(Variable::Name(name)) = rhs {
+                    let reference = environment.get_or_add(name.to_owned());
+                    *rhs = Item::Wildcard(Variable::Reference(reference));
                 }
-
-                bindings
             }
-            Pattern::Range { .. } => vec![],
-            Pattern::Type(_) => vec![],
-            Pattern::Unary { right, .. } => right.bindings(),
+            Pattern::Range { .. } => {}
+            Pattern::Type(_) => {}
+            Pattern::Unary { right, .. } => right.bind(environment),
             Pattern::Wildcard(binding) => {
-                if let Some(binding) = binding {
-                    vec![binding.clone()]
-                } else {
-                    vec![]
+                if let Some(Variable::Name(name)) = binding {
+                    let reference = environment.get_or_add(name.to_owned());
+                    *self = Pattern::Wildcard(Some(Variable::Reference(reference)));
                 }
             }
         }
     }
 
-    pub fn precedence(&self, bindings: &[Option<String>]) -> i32 {
+    pub fn references(&self) -> Vec<u16> {
+        match self {
+            Pattern::Binary { left, right, .. } => {
+                let mut references = left.references();
+                references.append(&mut right.references());
+                references
+            }
+            Pattern::Comparision { rhs, .. } => {
+                if let Item::Wildcard(var) = rhs {
+                    vec![var.reference()]
+                } else {
+                    vec![]
+                }
+            }
+            Pattern::List { left, right } => {
+                let mut references = left.references();
+                references.append(&mut right.references());
+                references
+            }
+            Pattern::OperatorComparison {
+                operator_chain,
+                rhs,
+                ..
+            } => {
+                let mut references = vec![];
+                operator_chain.references(&mut references);
+                if let Item::Wildcard(var) = rhs {
+                    references.push(var.reference());
+                }
+                references
+            }
+            Pattern::Unary { right, .. } => right.references(),
+            Pattern::Wildcard(var) => {
+                if let Some(var) = var {
+                    vec![var.reference()]
+                } else {
+                    vec![]
+                }
+            }
+            Pattern::Literal(_) | Pattern::Range { .. } | Pattern::Type(_) => vec![],
+        }
+    }
+
+    pub fn precedence(&self, bindings: &[u16]) -> i32 {
         match self {
             Pattern::Binary {
                 left,
@@ -399,14 +463,16 @@ impl Pattern {
             Pattern::Range { .. } => PatternPrecedence::Range.into(),
             Pattern::Type(_) => PatternPrecedence::Type.into(),
             Pattern::Unary { right, .. } => {
-                mem::variant_count::<PatternPrecedence>() as i32 * 10 - right.precedence(bindings)
+                PatternPrecedence::COUNT as i32 * 10 - right.precedence(bindings)
             }
-            Pattern::Wildcard(name) => {
-                if bindings.contains(name) {
-                    PatternPrecedence::Literal.into()
-                } else {
-                    PatternPrecedence::Wildcard.into()
+            Pattern::Wildcard(var) => {
+                if let Some(var) = var {
+                    if bindings.contains(&var.reference()) {
+                        return PatternPrecedence::Literal.into();
+                    }
                 }
+
+                PatternPrecedence::Wildcard.into()
             }
         }
     }
@@ -423,9 +489,9 @@ impl Pattern {
         matches!(self, Pattern::List { .. })
     }
 
-    pub fn is_literal(&self, bindings: &[Option<String>]) -> bool {
+    pub fn is_literal(&self, bindings: &[Option<u16>]) -> bool {
         if let Pattern::Wildcard(name) = self {
-            bindings.contains(name)
+            bindings.contains(&name.as_ref().map(|var| var.reference()))
         } else {
             matches!(self, Pattern::Literal(_))
         }
@@ -452,9 +518,9 @@ impl Pattern {
         matches!(self, Pattern::Type(_))
     }
 
-    pub fn is_wildcard(&self, bindings: &[Option<String>]) -> bool {
+    pub fn is_wildcard(&self, bindings: &[Option<u16>]) -> bool {
         if let Pattern::Wildcard(name) = self {
-            !bindings.contains(name)
+            !bindings.contains(&name.as_ref().map(|var| var.reference()))
         } else {
             false
         }
@@ -477,7 +543,7 @@ impl Pattern {
 impl From<&Token> for Item {
     fn from(value: &Token) -> Self {
         match value.kind() {
-            TokenType::Identifier => Item::Wildcard(value.lexeme().to_owned()),
+            TokenType::Identifier => Item::Wildcard(Variable::Name(value.lexeme().to_owned())),
             TokenType::Nothing | TokenType::Number | TokenType::String => Item::Value(value.into()),
             _ => internal_error!("parsed token {:?} as literal or identifier", value),
         }
@@ -490,8 +556,8 @@ impl From<Token> for Item {
     }
 }
 
-impl From<Token> for Type {
-    fn from(value: Token) -> Self {
+impl From<&Token> for Type {
+    fn from(value: &Token) -> Self {
         match value.lexeme().as_str() {
             "Integer" => Type::Integer,
             "List" => Type::List,
@@ -502,8 +568,14 @@ impl From<Token> for Type {
     }
 }
 
-impl From<parser::Pattern> for Pattern {
-    fn from(value: parser::Pattern) -> Self {
+impl From<Token> for Type {
+    fn from(value: Token) -> Self {
+        (&value).into()
+    }
+}
+
+impl From<&parser::Pattern> for Pattern {
+    fn from(value: &parser::Pattern) -> Self {
         match value {
             parser::Pattern::Binary {
                 left,
@@ -517,9 +589,9 @@ impl From<parser::Pattern> for Pattern {
                 };
 
                 Pattern::Binary {
-                    left: Box::new((&*left).into()),
+                    left: Box::new((&**left).into()),
                     operator,
-                    right: Box::new((&*right).into()),
+                    right: Box::new((&**right).into()),
                 }
             }
             parser::Pattern::Comparision { comparison, rhs } => {
@@ -539,8 +611,8 @@ impl From<parser::Pattern> for Pattern {
                 }
             }
             parser::Pattern::List { left, right } => Pattern::List {
-                left: Box::new((&*left).into()),
-                right: Box::new((&*right).into()),
+                left: Box::new((&**left).into()),
+                right: Box::new((&**right).into()),
             },
             parser::Pattern::Literal(token) => Pattern::Literal(token.into()),
             parser::Pattern::OperatorComparison {
@@ -572,7 +644,7 @@ impl From<parser::Pattern> for Pattern {
             } => Pattern::Range {
                 lower: lower.into(),
                 upper: upper.into(),
-                inclusive,
+                inclusive: *inclusive,
             },
             parser::Pattern::Type(kind) => Pattern::Type(kind.into()),
             parser::Pattern::Unary { operator, right } => {
@@ -583,11 +655,13 @@ impl From<parser::Pattern> for Pattern {
 
                 Pattern::Unary {
                     operator,
-                    right: Box::new((&*right).into()),
+                    right: Box::new((&**right).into()),
                 }
             }
             parser::Pattern::Wildcard(token) => match token.kind() {
-                TokenType::Identifier => Pattern::Wildcard(Some(token.lexeme().to_string())),
+                TokenType::Identifier => {
+                    Pattern::Wildcard(Some(Variable::Name(token.lexeme().to_string())))
+                }
                 TokenType::Underscore => Pattern::Wildcard(None),
                 _ => internal_error!("parsed '{:?}' as wildcard", token),
             },
@@ -595,8 +669,8 @@ impl From<parser::Pattern> for Pattern {
     }
 }
 
-impl From<&parser::Pattern> for Pattern {
-    fn from(value: &parser::Pattern) -> Self {
-        value.clone().into()
+impl From<parser::Pattern> for Pattern {
+    fn from(value: parser::Pattern) -> Self {
+        (&value).into()
     }
 }

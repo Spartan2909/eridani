@@ -6,7 +6,7 @@ pub use match_engine::match_args;
 use crate::{
     common::{internal_error, natives, value::Value, EridaniFunction},
     compiler::{
-        analyser::pattern::{LogOp, Pattern},
+        analyser::pattern::{LogOp, Pattern, Variable},
         parser::{self, ImportTree, ParseTree},
         scanner::{self, TokenType},
         Error, Result,
@@ -18,13 +18,18 @@ use alloc::{
     collections::BTreeMap,
     rc::{Rc, Weak},
 };
-use core::{
-    cell::RefCell,
-    fmt::{self, Debug},
-};
+use core::{cell::RefCell, fmt, ptr::NonNull};
 
 #[cfg(not(feature = "no_std"))]
 use std::{fs, path};
+
+use bimap::BiMap;
+
+#[derive(Debug, Clone, Copy)]
+enum FunctionKind {
+    Eridani,
+    Rust,
+}
 
 pub enum Function {
     Eridani {
@@ -52,15 +57,18 @@ impl Clone for Function {
     }
 }
 
-impl Debug for Function {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+impl fmt::Debug for Function {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Function::Rust { name, .. } => {
-                write!(f, "Function::Rust {{\n    name: \"{name}\",\n}}")
-            }
-            Function::Eridani { name, .. } => {
-                write!(f, "Function::Eridani {{\n    name: \"{name}\",\n}}")
-            }
+            Function::Rust { name, .. } => f
+                .debug_struct("Function::Rust")
+                .field("name", name)
+                .finish(),
+            Function::Eridani { name, methods } => f
+                .debug_struct("Function::Eridani")
+                .field("name", name)
+                .field("methods", methods)
+                .finish(),
         }
     }
 }
@@ -92,16 +100,18 @@ impl PartialEq for Function {
             }
             (
                 Function::Rust {
-                    name: name1,
-                    func: _,
+                    name: _,
+                    func: func1,
                 },
                 Function::Rust {
-                    name: name2,
-                    func: _,
+                    name: _,
+                    func: func2,
                 },
             ) => {
-                // TODO add proper comparison
-                name1 == name2
+                let ptr1: *const Box<dyn EridaniFunction> = func1;
+                let ptr2: *const Box<dyn EridaniFunction> = func2;
+
+                ptr1 == ptr2
             }
             _ => false,
         }
@@ -109,7 +119,7 @@ impl PartialEq for Function {
 }
 
 impl Function {
-    pub fn name(&self) -> &str {
+    pub fn name(&self) -> &String {
         match self {
             Function::Eridani { name, .. } => name,
             Function::Rust { name, .. } => name,
@@ -148,26 +158,55 @@ impl Function {
 
     pub fn native(&self) -> Option<Box<dyn EridaniFunction>> {
         if let Function::Rust { func, .. } = self {
-            Some(func.clone())
+            Some(func.to_owned())
         } else {
             None
         }
     }
+
+    fn clear(&mut self) {
+        if let Function::Eridani { methods, .. } = self {
+            *methods = vec![];
+        }
+    }
+
+    fn kind(&self) -> FunctionKind {
+        match self {
+            Function::Eridani { .. } => FunctionKind::Eridani,
+            Function::Rust { .. } => FunctionKind::Rust,
+        }
+    }
 }
 
-pub struct Program(
-    pub(crate) Rc<RefCell<Function>>,
-    pub(crate) Vec<Rc<RefCell<Function>>>,
-);
+pub struct Program(Rc<RefCell<Function>>, Vec<Rc<RefCell<Function>>>);
+
+impl Program {
+    pub(crate) fn entry_point(&self) -> &Rc<RefCell<Function>> {
+        &self.0
+    }
+
+    pub(crate) fn functions(&self) -> &Vec<Rc<RefCell<Function>>> {
+        &self.1
+    }
+}
+
+impl Drop for Program {
+    fn drop(&mut self) {
+        for function in &self.1 {
+            function.borrow_mut().clear();
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Method {
-    args: Vec<(Option<String>, Pattern)>,
+    args: Vec<(Option<u16>, Pattern)>,
     body: Expr,
+    environment: Box<Environment>,
 }
 
 impl Method {
-    pub fn args(&self) -> &Vec<(Option<String>, Pattern)> {
+    pub fn args(&self) -> &Vec<(Option<u16>, Pattern)> {
         &self.args
     }
 
@@ -175,7 +214,7 @@ impl Method {
         &self.body
     }
 
-    pub fn precedence(&self, bindings: &[Option<String>]) -> i32 {
+    pub fn precedence(&self, bindings: &[u16]) -> i32 {
         self.args
             .iter()
             .map(|(_, pattern)| pattern)
@@ -194,13 +233,15 @@ pub enum BinOp {
 
 impl fmt::Display for BinOp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            BinOp::Add => write!(f, "+"),
-            BinOp::Sub => write!(f, "-"),
-            BinOp::Mul => write!(f, "*"),
-            BinOp::Div => write!(f, "/"),
-            BinOp::Mod => write!(f, "%"),
-        }
+        let string = match self {
+            BinOp::Add => "+",
+            BinOp::Sub => "-",
+            BinOp::Mul => "*",
+            BinOp::Div => "/",
+            BinOp::Mod => "%",
+        };
+
+        write!(f, "{string}")
     }
 }
 
@@ -210,6 +251,75 @@ pub enum UnOp {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct Environment {
+    variables: BiMap<String, u16>,
+    enclosing: Option<NonNull<Environment>>,
+}
+
+impl Environment {
+    /// # Safety
+    /// The enclosing environment must remain in the same place in memory
+    /// while this environment exists.
+    pub unsafe fn new(enclosing: &Environment) -> Box<Environment> {
+        Box::new(Self {
+            variables: BiMap::new(),
+            enclosing: Some(NonNull::from(enclosing)),
+        })
+    }
+
+    pub fn new_toplevel() -> Box<Environment> {
+        Box::new(Self {
+            variables: BiMap::new(),
+            enclosing: None,
+        })
+    }
+
+    pub fn variables(&self) -> &BiMap<String, u16> {
+        &self.variables
+    }
+
+    fn new_reference(&self) -> u16 {
+        if let Some(reference) = self.variables.right_values().max() {
+            *reference + 1
+        } else if let Some(enclosing) = self.enclosing {
+            // SAFETY: `self.enclosing` is guaranteed to be valid
+            // and we never mutate the enclosing environment
+            let enclosing = unsafe { enclosing.as_ref() };
+            enclosing.new_reference()
+        } else {
+            0
+        }
+    }
+
+    pub fn get_or_add(&mut self, name: String) -> u16 {
+        if let Some(reference) = self.get(&name) {
+            reference
+        } else {
+            let reference = self.new_reference();
+            self.variables.insert(name, reference);
+            reference
+        }
+    }
+
+    pub fn get(&self, name: &str) -> Option<u16> {
+        if let Some(reference) = self.variables.get_by_left(name) {
+            Some(*reference)
+        } else if let Some(enclosing) = self.enclosing {
+            // SAFETY: `self.enclosing` is guaranteed to be valid
+            // and we never mutate the enclosing environment
+            let enclosing = unsafe { enclosing.as_ref() };
+            enclosing.get(name)
+        } else {
+            None
+        }
+    }
+
+    pub fn names(&self) -> Vec<&String> {
+        self.variables.left_values().collect()
+    }
+}
+
+#[derive(Clone, PartialEq)]
 pub enum Expr {
     Binary {
         left: Box<Self>,
@@ -219,6 +329,7 @@ pub enum Expr {
     Block {
         body: Vec<Self>,
         line: usize,
+        environment: Box<Environment>,
     },
     Call {
         callee: Box<Self>,
@@ -249,7 +360,7 @@ pub enum Expr {
         right: Box<Self>,
     },
     Variable {
-        name: String,
+        reference: u16,
         line: usize,
     },
 }
@@ -338,7 +449,7 @@ impl Expr {
                 let mut calls = callee.calls();
 
                 for expr in arguments {
-                    calls.append(&mut expr.calls())
+                    calls.append(&mut expr.calls());
                 }
 
                 calls
@@ -365,7 +476,7 @@ impl Expr {
     pub(crate) fn line(&self) -> usize {
         match self {
             Expr::Binary { right, .. } => right.line(),
-            Expr::Block { body, line } => {
+            Expr::Block { body, line, .. } => {
                 if let Some(expr) = body.last() {
                     expr.line()
                 } else {
@@ -388,6 +499,80 @@ impl Expr {
             Expr::PlaceHolder(placeholder) => placeholder.line(),
             Expr::Unary { right, .. } => right.line(),
             Expr::Variable { line, .. } => *line,
+        }
+    }
+}
+
+impl fmt::Debug for Expr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Expr::Binary {
+                left,
+                operator,
+                right,
+            } => f
+                .debug_struct("Expr::Binary")
+                .field("left", left)
+                .field("operator", operator)
+                .field("right", right)
+                .finish(),
+            Expr::Block {
+                body,
+                line,
+                environment,
+            } => f
+                .debug_struct("Expr::Block")
+                .field("body", body)
+                .field("line", line)
+                .field("environment", environment)
+                .finish(),
+            Expr::Call {
+                callee,
+                arguments,
+                line,
+            } => f
+                .debug_struct("Expr::Call")
+                .field("callee", callee)
+                .field("arguments", arguments)
+                .field("line", line)
+                .finish(),
+            Expr::Function { function, line } => f
+                .debug_struct("Expr::Function")
+                .field("function", function.borrow().name())
+                .field("line", line)
+                .field("kind", &function.borrow().kind())
+                .finish(),
+            Expr::Grouping(expr) => f.debug_tuple("Expr::Grouping").field(expr).finish(),
+            Expr::Let { pattern, value } => f
+                .debug_struct("Expr::Let")
+                .field("pattern", pattern)
+                .field("value", value)
+                .finish(),
+            Expr::List { expressions, line } => f
+                .debug_struct("Expr::List")
+                .field("expressions", expressions)
+                .field("line", line)
+                .finish(),
+            Expr::Literal { value, line } => f
+                .debug_struct("Expr::Literal")
+                .field("value", value)
+                .field("line", line)
+                .finish(),
+            Expr::Method(method) => f.debug_tuple("Expr::Method").field(method).finish(),
+            Expr::PlaceHolder(placeholder) => f
+                .debug_tuple("Expr::Placeholder")
+                .field(placeholder)
+                .finish(),
+            Expr::Unary { operator, right } => f
+                .debug_struct("Expr::Unary")
+                .field("operator", operator)
+                .field("right", right)
+                .finish(),
+            Expr::Variable { reference, line } => f
+                .debug_struct("Expr::Variable")
+                .field("reference", reference)
+                .field("line", line)
+                .finish(),
         }
     }
 }
@@ -426,10 +611,16 @@ impl Binding {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Visibility {
+    Public,
+    Private,
+}
+
 #[derive(Debug)]
 struct Module {
     name: String,
-    submodules: Vec<(Rc<RefCell<Module>>, bool)>,
+    submodules: Vec<(Rc<RefCell<Module>>, Visibility)>,
     functions: Vec<Rc<RefCell<Function>>>,
     function_names: Vec<String>,
     bindings: BTreeMap<String, Binding>,
@@ -450,7 +641,7 @@ impl Module {
 
     fn find(&self, name: &str, looking_from_module_tree: bool) -> Option<Binding> {
         if let Some(module) = self.find_module(name, looking_from_module_tree) {
-            Some(Binding::Module(module))
+            Some(Binding::Module(Rc::clone(module)))
         } else {
             self.find_function(name).map(Binding::Function)
         }
@@ -460,10 +651,15 @@ impl Module {
         &self,
         name: &str,
         looking_from_module_tree: bool,
-    ) -> Option<Rc<RefCell<Module>>> {
-        for (submodule, public) in &self.submodules {
-            if submodule.borrow().name == name && (looking_from_module_tree || *public) {
-                return Some(Rc::clone(submodule));
+    ) -> Option<&Rc<RefCell<Module>>> {
+        if let Some(Binding::Module(module)) = self.bindings.get(name) {
+            return Some(module);
+        }
+        for (submodule, visibility) in &self.submodules {
+            if submodule.borrow().name == name
+                && (looking_from_module_tree || *visibility == Visibility::Public)
+            {
+                return Some(submodule);
             }
         }
 
@@ -479,6 +675,24 @@ impl Module {
 
         None
     }
+
+    fn destroy(&mut self) {
+        for (submodule, _) in &self.submodules {
+            if let Ok(mut submodule) = submodule.try_borrow_mut() {
+                submodule.destroy();
+            }
+        }
+        self.submodules = vec![];
+        self.functions = vec![];
+        for binding in self.bindings.values() {
+            if let Binding::Module(module) = binding {
+                if let Ok(mut module) = module.try_borrow_mut() {
+                    module.destroy();
+                }
+            }
+        }
+        self.bindings = BTreeMap::new();
+    }
 }
 
 /// Returns the module, and the path to the file containing that code, if it exists
@@ -489,7 +703,7 @@ fn resolve_module(
     line: usize,
 ) -> Result<(Rc<RefCell<Module>>, bool)> {
     if let Some(module) = importing_module.borrow().find_module(name, true) {
-        return Ok((module, true));
+        return Ok((Rc::clone(module), true));
     }
 
     let location = format!(" at {name}");
@@ -520,7 +734,7 @@ fn resolve_submodule(
             let mut module_file = supermodule_folder.to_owned();
             let file_name = path::PathBuf::from(format!("{name}.eri"));
             module_file.push(file_name);
-            if fs::try_exists(&module_file).unwrap_or(false) {
+            if module_file.try_exists().unwrap_or(false) {
                 let contents = fs::read_to_string(&module_file)
                     .unwrap_or_else(|_| internal_error!("read from invalid file"));
                 return Ok((contents, module_file.to_string_lossy().into()));
@@ -528,7 +742,7 @@ fn resolve_submodule(
             let mut module_in_folder = supermodule_folder.to_owned();
             let file_name = path::PathBuf::from(format!("{name}/mod.eri"));
             module_in_folder.push(file_name);
-            if fs::try_exists(&module_file).unwrap_or(false) {
+            if module_file.try_exists().unwrap_or(false) {
                 let contents = fs::read_to_string(&module_file)
                     .unwrap_or_else(|_| internal_error!("read from invalid file"));
                 return Ok((contents, module_in_folder.to_string_lossy().into()));
@@ -629,7 +843,7 @@ fn get_std() -> Result<(Vec<Rc<RefCell<Module>>>, BTreeMap<String, Binding>)> {
     std_module
         .borrow_mut()
         .submodules
-        .push((Rc::clone(&natives_module), false));
+        .push((Rc::clone(&natives_module), Visibility::Private));
 
     let mut modules = vec![Rc::clone(&std_module), Rc::clone(&natives_module)];
 
@@ -644,8 +858,9 @@ fn get_std() -> Result<(Vec<Rc<RefCell<Module>>>, BTreeMap<String, Binding>)> {
 
     let prelude = super::eridani_std::PRELUDE;
     let mut bindings = BTreeMap::new();
+    bindings.insert("std".to_string(), Binding::Module(Rc::clone(&std_module)));
     for function in std_module.borrow().functions.iter() {
-        if prelude.contains(&function.borrow().name()) {
+        if prelude.contains(&function.borrow().name().as_str()) {
             bindings.insert(
                 function.borrow().name().to_string(),
                 Binding::Function(Rc::clone(function)),
@@ -660,7 +875,26 @@ fn clone_bindings(bindings: &BTreeMap<String, Binding>) -> BTreeMap<String, Bind
     BTreeMap::from_iter(bindings.iter().map(|(a, b)| (a.clone(), b.clone())))
 }
 
-fn verify_pattern(pattern: Pattern, line: usize) -> Result<Pattern> {
+fn slices_overlap<T: PartialEq>(s1: &[T], s2: &[T]) -> bool {
+    if s1.len() != s2.len() {
+        return false;
+    }
+
+    for item in s1 {
+        if !s2.contains(item) {
+            return false;
+        }
+    }
+    for item in s2 {
+        if !s1.contains(item) {
+            return false;
+        }
+    }
+
+    true
+}
+
+fn verify_pattern(pattern: &Pattern, line: usize) -> Result<()> {
     match pattern.clone() {
         Pattern::Binary {
             left,
@@ -675,12 +909,21 @@ fn verify_pattern(pattern: Pattern, line: usize) -> Result<Pattern> {
                     "Patterns of the form '<literal> & <pattern>' are forbidden",
                 ));
             }
-            verify_pattern(*left, line)?;
-            verify_pattern(*right, line)?;
+            if operator == LogOp::Or && !slices_overlap(&left.references(), &right.references()) {
+                return Err(Error::new(
+                    line,
+                    "Pattern",
+                    "",
+                    "Both sides of a '|' pattern must have the same bindings",
+                ));
+            }
+
+            verify_pattern(&left, line)?;
+            verify_pattern(&right, line)?;
         }
         Pattern::List { left, right } => {
-            verify_pattern(*left, line)?;
-            verify_pattern(*right, line)?;
+            verify_pattern(&left, line)?;
+            verify_pattern(&right, line)?;
         }
         Pattern::Range {
             lower,
@@ -693,10 +936,13 @@ fn verify_pattern(pattern: Pattern, line: usize) -> Result<Pattern> {
                 return Err(Error::new(line, "Pattern", "", "Range will never match"));
             }
         }
+        Pattern::Wildcard(Some(Variable::Name(name))) => {
+            internal_error!("unbound wildcard pattern: '{}'", name);
+        }
         _ => {}
     }
 
-    Ok(pattern)
+    Ok(())
 }
 
 pub fn analyse(
@@ -726,6 +972,10 @@ pub fn analyse(
         }
     };
 
+    for module in modules {
+        module.borrow_mut().destroy();
+    }
+
     let mut calls = Calls::new();
     calls.push(Rc::clone(&entry_point));
     let functions = calls.calls;
@@ -741,7 +991,11 @@ fn analyse_module(
     bindings: &BTreeMap<String, Binding>,
 ) -> Result<()> {
     for (public, module_name) in parse_tree.modules() {
-        let public = public.is_some();
+        let public = if public.is_some() {
+            Visibility::Public
+        } else {
+            Visibility::Private
+        };
         let (submodule, submodule_origin) =
             resolve_submodule(module_name.lexeme(), module_name.line(), source_origin)?;
         let submodule_parse_tree = parser::parse(scanner::scan(&submodule)?)?;
@@ -785,7 +1039,7 @@ fn analyse_module(
         module
             .borrow_mut()
             .function_names
-            .push(function.name().lexeme().to_string())
+            .push(function.name().lexeme().to_string());
     }
 
     for (i, function) in parse_tree.functions().iter().enumerate() {
@@ -793,38 +1047,52 @@ fn analyse_module(
 
         let mut methods = vec![];
         for method in function.methods() {
-            let tmp: Vec<(Option<String>, Result<Pattern>)> = method
+            let mut lines = vec![];
+            let mut args: Vec<(Option<String>, Pattern)> = method
                 .args()
                 .iter()
-                .map(|x| (x.name(), verify_pattern(x.pattern().into(), x.line())))
+                .map(|pattern| {
+                    lines.push(pattern.line());
+                    (pattern.name(), pattern.pattern().into())
+                })
                 .collect();
-            let mut args = vec![];
-            for (name, pattern) in tmp {
-                args.push((name, pattern?))
-            }
 
-            let mut internal_bindings = vec![];
-            for (name, pattern) in args.iter().map(|(a, b)| (a, b)) {
+            let mut environment = Environment::new_toplevel();
+            let mut references = vec![];
+            for (name, pattern) in &mut args {
+                // this order is important!
+                pattern.bind(&mut environment);
                 if let Some(name) = name {
-                    internal_bindings.push(name.clone());
+                    let reference = environment.get_or_add(name.to_owned());
+                    references.push(Some(reference));
+                } else {
+                    references.push(None);
                 }
-                internal_bindings.append(&mut pattern.bindings());
             }
 
-            let (body, _) = convert_expr(
-                method.body(),
-                Rc::clone(&module),
-                internal_bindings,
-                modules,
-            )?;
+            for (i, (_, pattern)) in args.iter().enumerate() {
+                verify_pattern(pattern, lines[i])?;
+            }
 
-            methods.push(RefCell::new(Method { args, body }));
+            let args = args
+                .into_iter()
+                .zip(references)
+                .map(|((_, pattern), reference)| (reference, pattern))
+                .collect();
+
+            let body = convert_expr(method.body(), Rc::clone(&module), &mut environment, modules)?;
+
+            methods.push(RefCell::new(Method {
+                args,
+                body,
+                environment,
+            }));
         }
 
         module
             .borrow_mut()
             .functions
-            .push(Rc::new(RefCell::new(Function::Eridani { name, methods })))
+            .push(Rc::new(RefCell::new(Function::Eridani { name, methods })));
     }
 
     for function in &module.borrow().functions {
@@ -837,9 +1105,9 @@ fn analyse_module(
 fn convert_expr(
     expr: &parser::Expr,
     module: Rc<RefCell<Module>>,
-    bindings: Vec<String>,
+    environment: &mut Box<Environment>,
     modules: &mut [Rc<RefCell<Module>>],
-) -> Result<(Expr, Vec<String>)> {
+) -> Result<Expr> {
     use parser::Expr as ParseExpr;
 
     let result = match expr {
@@ -857,92 +1125,108 @@ fn convert_expr(
                 _ => internal_error!("parsed token '{:?}' as operator", operator),
             };
 
-            let (left, bindings) = convert_expr(left, Rc::clone(&module), bindings, modules)?;
-            let (right, bindings) = convert_expr(right, module, bindings, modules)?;
+            let left = convert_expr(left, Rc::clone(&module), environment, modules)?;
+            let right = convert_expr(right, module, environment, modules)?;
 
-            (
-                Expr::Binary {
-                    left: Box::new(left),
-                    operator,
-                    right: Box::new(right),
-                },
-                bindings,
-            )
+            Expr::Binary {
+                left: Box::new(left),
+                operator,
+                right: Box::new(right),
+            }
         }
         ParseExpr::Block { body, end } => {
-            let body = convert_exprs(body, &module, &bindings, modules)?;
-            (
-                Expr::Block {
-                    body,
-                    line: end.line(),
-                },
-                bindings,
-            )
+            // SAFETY: `environment` is boxed and will not move
+            let mut inner_environment = unsafe { Environment::new(environment) };
+            let body = convert_exprs(body, &module, &mut inner_environment, modules)?;
+
+            Expr::Block {
+                body,
+                line: end.line(),
+                environment: inner_environment,
+            }
         }
         ParseExpr::Call {
             callee,
             paren,
             arguments,
         } => {
-            let (callee, bindings) = convert_expr(callee, Rc::clone(&module), bindings, modules)?;
-            let arguments = convert_exprs(arguments, &module, &bindings, modules)?;
-            (
-                Expr::Call {
-                    callee: Box::new(callee),
-                    arguments,
-                    line: paren.line(),
-                },
-                bindings,
-            )
+            let callee = convert_expr(callee, Rc::clone(&module), environment, modules)?;
+
+            let arguments = convert_exprs(arguments, &module, environment, modules)?;
+
+            Expr::Call {
+                callee: Box::new(callee),
+                arguments,
+                line: paren.line(),
+            }
         }
         ParseExpr::Grouping(expr) => {
-            let (expr, bindings) = convert_expr(expr, Rc::clone(&module), bindings, modules)?;
-            (Expr::Grouping(Box::new(expr)), bindings)
+            let expr = convert_expr(expr, Rc::clone(&module), environment, modules)?;
+            Expr::Grouping(Box::new(expr))
         }
         ParseExpr::Let { pattern, value } => {
-            let (value, bindings) = convert_expr(value, module, bindings, modules)?;
-            (
-                Expr::Let {
-                    pattern: pattern.into(),
-                    value: Box::new(value),
-                },
-                bindings,
-            )
+            let value = convert_expr(value, module, environment, modules)?;
+            let mut pattern: Pattern = pattern.into();
+            pattern.bind(environment);
+
+            Expr::Let {
+                pattern,
+                value: Box::new(value),
+            }
         }
-        ParseExpr::List { expressions, end } => (
-            Expr::List {
-                expressions: convert_exprs(expressions, &module, &bindings, modules)?,
-                line: end.line(),
-            },
-            bindings,
-        ),
+        ParseExpr::List { expressions, end } => Expr::List {
+            expressions: convert_exprs(expressions, &module, environment, modules)?,
+            line: end.line(),
+        },
         ParseExpr::Literal(token) => {
             let line = token.line();
-            (
-                Expr::Literal {
-                    value: token.into(),
-                    line,
-                },
-                bindings,
-            )
+
+            Expr::Literal {
+                value: token.into(),
+                line,
+            }
         }
         ParseExpr::Method(method) => {
-            let args: Vec<(Option<String>, Pattern)> = method
+            let mut lines = vec![];
+            let mut args: Vec<(Option<String>, Pattern)> = method
                 .args()
                 .iter()
-                .map(|x| (x.name(), x.pattern().into()))
+                .map(|pattern| {
+                    lines.push(pattern.line());
+                    (pattern.name(), pattern.pattern().into())
+                })
                 .collect();
 
-            let mut internal_bindings = bindings.clone();
-            for (name, pattern) in args.iter().map(|(a, b)| (a, b)) {
+            // SAFETY: `environment` is boxed and will never move
+            let mut inner_environment = unsafe { Environment::new(environment) };
+            let mut references = vec![];
+            for (name, pattern) in &mut args {
+                // this order is important!
+                pattern.bind(&mut inner_environment);
                 if let Some(name) = name {
-                    internal_bindings.push(name.clone());
+                    let reference = inner_environment.get_or_add(name.clone());
+                    references.push(Some(reference));
+                } else {
+                    references.push(None);
                 }
-                internal_bindings.append(&mut pattern.bindings());
             }
 
-            let (body, _) = convert_expr(method.body(), module, internal_bindings, modules)?;
-            (Expr::Method(Box::new(Method { args, body })), bindings)
+            for (i, (_, pattern)) in args.iter().enumerate() {
+                verify_pattern(pattern, lines[i])?;
+            }
+
+            let args = args
+                .into_iter()
+                .zip(references)
+                .map(|((_, pattern), reference)| (reference, pattern))
+                .collect();
+
+            let body = convert_expr(method.body(), module, &mut inner_environment, modules)?;
+            Expr::Method(Box::new(Method {
+                args,
+                body,
+                environment: inner_environment,
+            }))
         }
         ParseExpr::Unary { operator, right } => {
             let operator = match operator.kind() {
@@ -950,18 +1234,14 @@ fn convert_expr(
                 _ => internal_error!("parsed token {:?} as unary", operator),
             };
 
-            let (right, bindings) = convert_expr(right, module, bindings, modules)?;
+            let right = convert_expr(right, module, environment, modules)?;
 
-            (
-                Expr::Unary {
-                    operator,
-                    right: Box::new(right),
-                },
-                bindings,
-            )
+            Expr::Unary {
+                operator,
+                right: Box::new(right),
+            }
         }
         ParseExpr::Variable(var) => {
-            let mut bindings = bindings;
             let expr = if var.next().is_some() {
                 let (import_module, looking_from_module_tree) =
                     resolve_module(var.name().lexeme(), module, modules, var.name().line())?;
@@ -984,9 +1264,9 @@ fn convert_expr(
                     function,
                     line: var.line(),
                 }
-            } else if bindings.contains(var.name().lexeme()) {
+            } else if let Some(reference) = environment.get(var.name().lexeme()) {
                 Expr::Variable {
-                    name: var.name().lexeme().to_string(),
+                    reference,
                     line: var.line(),
                 }
             } else if module
@@ -999,21 +1279,26 @@ fn convert_expr(
                 if let Binding::Function(_) = binding {
                     Expr::PlaceHolder(var.clone())
                 } else {
-                    Expr::Variable {
-                        name: var.name().lexeme().to_string(),
-                        line: var.line(),
-                    }
+                    let location = format!(" at {}", var.name().lexeme());
+                    return Err(Error::new(
+                        var.line(),
+                        "Name",
+                        &location,
+                        "Cannot use module as variable",
+                    ));
                 }
-            } else {
-                let name = var.name().lexeme().to_string();
-                bindings.push(name.clone());
+            } else if let Some(reference) = environment.get(var.name().lexeme()) {
                 Expr::Variable {
-                    name,
+                    reference,
                     line: var.line(),
                 }
+            } else {
+                let location = format!(" at {}", var.name().lexeme());
+                let message = format!("Unknown name '{}'", var.name().lexeme());
+                return Err(Error::new(var.line(), "Name", &location, &message));
             };
 
-            (expr, bindings)
+            expr
         }
     };
 
@@ -1023,14 +1308,13 @@ fn convert_expr(
 fn convert_exprs(
     values: &[parser::Expr],
     module: &Rc<RefCell<Module>>,
-    bindings: &[String],
+    environment: &mut Box<Environment>,
     modules: &mut [Rc<RefCell<Module>>],
 ) -> Result<Vec<Expr>> {
     let mut result = vec![];
     let mut expr;
-    let mut inner_bindings = bindings.to_owned();
     for value in values {
-        (expr, inner_bindings) = convert_expr(value, Rc::clone(module), inner_bindings, modules)?;
+        expr = convert_expr(value, Rc::clone(module), environment, modules)?;
         result.push(expr);
     }
     Ok(result)

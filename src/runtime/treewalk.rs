@@ -5,14 +5,14 @@ use crate::{
     runtime::{EridaniResult, Error, Result},
 };
 
-use alloc::{collections::BTreeMap, rc::Rc};
+use alloc::{collections::VecDeque, rc::Rc};
 use core::{cell::RefCell, cmp::Ordering, result};
 
 fn expr(
     expression: Expr,
-    bindings: &mut BTreeMap<String, Value>,
+    variables: Vec<Value>,
     function_name: &str,
-) -> Result<Value> {
+) -> Result<(Value, Vec<Value>)> {
     let line = expression.line();
     match expression {
         Expr::Binary {
@@ -20,8 +20,8 @@ fn expr(
             operator,
             right,
         } => {
-            let left = expr(*left, bindings, function_name)?;
-            let right = expr(*right, bindings, function_name)?;
+            let (left, variables) = expr(*left, variables, function_name)?;
+            let (right, variables) = expr(*right, variables, function_name)?;
 
             let result = match operator {
                 BinOp::Add => &left + &right,
@@ -32,7 +32,7 @@ fn expr(
             };
 
             if let Some(value) = result {
-                Ok(value)
+                Ok((value, variables))
             } else {
                 let message =
                     format!("Operation {operator} not permitted between {left} and {right}");
@@ -40,41 +40,53 @@ fn expr(
             }
         }
         Expr::Block { body, .. } => {
-            let values: Result<Vec<Value>> = body
-                .into_iter()
-                .map(|expression| expr(expression, bindings, function_name))
-                .collect();
-            Ok(values?.into_iter().last().unwrap_or(Value::Nothing))
+            let mut variables = variables;
+            let mut value = Value::Nothing;
+            for expression in body {
+                let (new_value, new_variables) = expr(expression, variables, function_name)?;
+                variables = new_variables;
+                value = new_value;
+            }
+            Ok((value, variables))
         }
         Expr::Call {
             callee,
             arguments,
             line,
         } => {
-            let callee = expr(*callee, bindings, function_name)?;
-            let arguments: Result<Vec<Value>> = arguments
-                .into_iter()
-                .map(|expression| expr(expression, bindings, function_name))
-                .collect();
-            let arguments = arguments?;
+            let (callee, mut variables) = expr(*callee, variables, function_name)?;
+
+            let mut evaluated_arguments = vec![];
+            for argument in arguments {
+                let (value, new_variables) = expr(argument, variables, function_name)?;
+                evaluated_arguments.push(value);
+                variables = new_variables;
+            }
+            let arguments = evaluated_arguments;
+
             match callee {
                 Value::Function(fun) => {
                     let name = fun.borrow().name().to_owned();
-                    function(fun, &arguments, &name, line).init_or_add_context(function_name, line)
+                    Ok((
+                        function(fun, &arguments, &name, line)
+                            .init_or_add_context(function_name, line)?,
+                        variables,
+                    ))
                 }
                 Value::Method(method) => {
-                    let matches = match match_args(method.args(), &arguments) {
-                        Ok(value) => value,
-                        Err(_) => {
-                            return Err(Error::new(
-                                "Pattern",
-                                "Circular dependencies in method arguments",
-                                line,
-                            ))
-                        }
-                    };
-                    let mut internal_bindings = match matches {
-                        Some(bindings) => bindings,
+                    let new_variables =
+                        match match_args(method.args(), &arguments, variables.clone()) {
+                            Ok(variables) => variables,
+                            Err(_) => {
+                                return Err(Error::new(
+                                    "Pattern",
+                                    "Circular dependencies in method arguments",
+                                    line,
+                                ))
+                            }
+                        };
+                    let new_variables = match new_variables {
+                        Some(variables) => variables,
                         None => {
                             let message =
                                 format!("Method does not match the arguments {:?}", arguments);
@@ -82,11 +94,10 @@ fn expr(
                         }
                     };
 
-                    expr(
-                        method.body().to_owned(),
-                        &mut internal_bindings,
-                        function_name,
-                    )
+                    Ok((
+                        expr(method.body().to_owned(), new_variables, function_name)?.0,
+                        variables,
+                    ))
                 }
                 _ => {
                     let message = format!("Cannot call value {callee}");
@@ -94,59 +105,61 @@ fn expr(
                 }
             }
         }
-        Expr::Function { function, .. } => Ok(Value::Function(function)),
-        Expr::Grouping(expression) => expr(*expression, bindings, function_name),
+        Expr::Function { function, .. } => Ok((Value::Function(function), variables)),
+        Expr::Grouping(expression) => expr(*expression, variables, function_name),
         Expr::Let { pattern, value } => {
-            let value = expr(*value, bindings, function_name)?;
-            let mut new_bindings = BTreeMap::new();
-            match pattern.matches(&value, &mut new_bindings) {
-                Some(_) => {}
+            let (value, variables) = expr(*value, variables, function_name)?;
+            let variables = match pattern.matches(&value, variables) {
+                Some(variables) => variables,
                 None => {
                     let message = format!("Pattern {:?} does not match {value}", pattern);
                     return Err(Error::new("Match", &message, line));
                 }
-            }
+            };
 
-            Ok(Value::Nothing)
+            Ok((Value::Nothing, variables))
         }
         Expr::List { expressions, .. } => {
+            let mut new_variables = variables.clone();
             let expressions: Result<Vec<Value>> = expressions
                 .into_iter()
-                .map(|expression| expr(expression, bindings, function_name))
+                .map(|expression| {
+                    let (value, vars) = expr(expression, new_variables.clone(), function_name)?;
+                    new_variables = vars;
+                    Ok(value)
+                })
                 .collect();
-            let expressions = expressions?;
-            Ok(Value::List(expressions))
+            Ok((Value::List(expressions?), variables))
         }
-        Expr::Literal { value, .. } => Ok(value),
-        Expr::Method(method) => Ok(Value::Method(method)),
+        Expr::Literal { value, .. } => Ok((value, variables)),
+        Expr::Method(method) => Ok((Value::Method(method), variables)),
         Expr::PlaceHolder(placeholder) => {
             internal_error!("placeholder '{:?}' at runtime", placeholder)
         }
         Expr::Unary { operator, right } => {
-            let right = expr(*right, bindings, function_name)?;
+            let (right, variables) = expr(*right, variables, function_name)?;
             match operator {
                 UnOp::Negate => {
                     if let Some(value) = -right {
-                        Ok(value)
+                        Ok((value, variables))
                     } else {
                         todo!()
                     }
                 }
             }
         }
-        Expr::Variable { name, line } => {
-            if let Some(value) = bindings.get(&name) {
-                Ok(value.to_owned())
+        Expr::Variable { reference, .. } => {
+            if let Some(value) = variables.get(reference as usize) {
+                Ok((value.to_owned(), variables))
             } else {
-                let message = format!("Unknown name '{name}'");
-                Err(Error::new("Name", &message, line))
+                internal_error!("unrecognised variable reference '{}'", reference)
             }
         }
     }
 }
 
 fn native_function(
-    function: Box<dyn EridaniFunction>,
+    mut function: Box<dyn EridaniFunction>,
     function_name: &str,
     args: &[Value],
 ) -> Result<Value> {
@@ -170,7 +183,7 @@ fn function(
         .borrow()
         .methods()
         .iter()
-        .map(|method| match_args(method.borrow().args(), args))
+        .map(|method| match_args(method.borrow().args(), args, vec![]))
         .collect();
 
     let matches = match matches {
@@ -200,15 +213,16 @@ fn function(
         );
         Err(Error::new("Match", &message, line)).extend_trace(function_name, line)
     } else if matches.len() == 1 {
-        let (function_index, bindings) = &mut matches[0];
-        expr(
-            function.borrow().methods()[*function_index]
+        let (function_index, bindings) = VecDeque::from(matches).pop_front().unwrap();
+        Ok(expr(
+            function.borrow().methods()[function_index]
                 .borrow()
                 .body()
                 .to_owned(),
             bindings,
             function.borrow().name(),
-        )
+        )?
+        .0)
     } else {
         let precedences: Vec<_> = matches
             .iter()
@@ -216,7 +230,8 @@ fn function(
                 function.borrow().methods()[*index].borrow().precedence(
                     &bindings
                         .iter()
-                        .map(|(a, _)| Some(a.to_owned()))
+                        .enumerate()
+                        .map(|(a, _)| a as u16)
                         .collect::<Vec<_>>(),
                 )
             })
@@ -236,23 +251,21 @@ fn function(
             }
         }
 
-        let (function_index, bindings) = &mut matches[min_index];
-        expr(
-            function.borrow().methods()[*function_index]
+        let (function_index, variables) = matches.remove(min_index);
+        Ok(expr(
+            function.borrow().methods()[function_index]
                 .borrow()
                 .body()
                 .to_owned(),
-            bindings,
+            variables,
             function.borrow().name(),
-        )
+        )?
+        .0)
     }
 }
 
 pub fn walk_tree(program: Program, args: &[Value]) -> Result<Value> {
-    let Program(entry_point, _) = program;
+    let entry_point = Rc::clone(program.entry_point());
 
     function(entry_point, args, "<program>", 0)
 }
-
-#[cfg(test)]
-mod tests;

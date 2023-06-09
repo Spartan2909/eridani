@@ -5,7 +5,9 @@ edition = "2021"
 default-run = "eri"
 
 [dependencies]
+bimap = { version = "0.6", default-features = false }
 clap = { version = "4.1", features = ["derive"], optional = true }
+strum = { version = "0.24", default-features = false, features = ["derive"] }
 
 [features]
 default = ["compiler", "runtime", "std", "target_std"]

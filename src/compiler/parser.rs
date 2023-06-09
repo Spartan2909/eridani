@@ -361,23 +361,7 @@ impl Parser {
         let mut errors = vec![];
 
         while !self.is_at_end() {
-            let result: Result<()> = try {
-                if self.match_token(TokenType::Use, true) {
-                    imports.push(self.import("Expect function or module name after 'use'")?);
-                } else if self.check_ignore_newlines(TokenType::Module, 0)
-                    || self.check_ignore_newlines(TokenType::Module, 1)
-                {
-                    let public = self.consume(TokenType::Public, "").ok();
-                    self.consume(TokenType::Module, "Expect 'module'")?;
-                    let module_name =
-                        self.consume(TokenType::Identifier, "Expect identifier after 'module'")?;
-                    modules.push((public, module_name));
-                } else {
-                    functions.push(self.function()?);
-                }
-            };
-
-            if let Err(err) = result {
+            if let Err(err) = self.parse_item(&mut modules, &mut imports, &mut functions) {
                 errors.push(err);
                 self.synchronise();
             } else {
@@ -396,6 +380,29 @@ impl Parser {
         } else {
             Err(Error::Collection(errors))
         }
+    }
+
+    fn parse_item(
+        &mut self,
+        modules: &mut Vec<(Option<Token>, Token)>,
+        imports: &mut Vec<ImportTree>,
+        functions: &mut Vec<Function>,
+    ) -> Result<()> {
+        if self.match_token(TokenType::Use, true) {
+            imports.push(self.import("Expect function or module name after 'use'")?);
+        } else if self.check_ignore_newlines(TokenType::Module, 0)
+            || self.check_ignore_newlines(TokenType::Module, 1)
+        {
+            let public = self.consume(TokenType::Public, "").ok();
+            self.consume(TokenType::Module, "Expect 'module'")?;
+            let module_name =
+                self.consume(TokenType::Identifier, "Expect identifier after 'module'")?;
+            modules.push((public, module_name));
+        } else {
+            functions.push(self.function()?);
+        }
+
+        Ok(())
     }
 
     fn import(&mut self, message: &'static str) -> Result<ImportTree> {
@@ -425,7 +432,7 @@ impl Parser {
                     "Cannot use 'super' before name",
                 ));
             }
-            tree.push(import.clone())
+            tree.push(import.clone());
         }
 
         Ok(tree)

@@ -1,7 +1,4 @@
-use crate::{
-    common::{value::Value, ArgumentError},
-    prelude::*,
-};
+use crate::common::{value::Value, ArgumentError};
 
 mod basic {
     use crate::{
@@ -32,7 +29,8 @@ mod basic {
         let value = get(args, 0)?;
         match &value {
             Value::Number(_) => Ok(value),
-            Value::String(s) if let Ok(n) = s.parse() => Ok(Value::Number(n)),
+            // replace with `if let` guard once they are stabilised
+            Value::String(s) if s.parse::<f64>().is_ok() => Ok(Value::Number(s.parse().unwrap())),
             _ => {
                 let description = format!("Invalid base for number: {value}");
                 Err(ArgumentError::new(&description))
@@ -72,16 +70,15 @@ mod feature_std {
         let _ = io::stdout().flush();
 
         let mut buf = String::new();
-        match io::stdin().read_line(&mut buf) {
-            Ok(_) => {
-                let input = buf
-                    .strip_suffix("\r\n")
-                    .or(buf.strip_suffix('\n'))
-                    .unwrap_or(&buf)
-                    .to_string();
-                Ok(Value::String(input))
-            }
-            Err(_) => Err(ArgumentError::new("Failed to read from stdin")),
+        if io::stdin().read_line(&mut buf).is_ok() {
+            let input = buf
+                .strip_suffix("\r\n")
+                .or(buf.strip_suffix('\n'))
+                .unwrap_or(&buf)
+                .to_string();
+            Ok(Value::String(input))
+        } else {
+            Err(ArgumentError::new("Failed to read from stdin"))
         }
     }
 }

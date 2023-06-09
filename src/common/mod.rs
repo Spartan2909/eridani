@@ -40,7 +40,7 @@ pub fn get_string(args: &[Value], index: usize) -> Result<String, ArgumentError>
     }
 }
 
-pub trait EridaniFunction: Fn(&[Value]) -> Result<Value, ArgumentError> {
+pub trait EridaniFunction: FnMut(&[Value]) -> Result<Value, ArgumentError> {
     fn clone_box<'a>(&self) -> Box<dyn 'a + EridaniFunction>
     where
         Self: 'a;
@@ -48,7 +48,7 @@ pub trait EridaniFunction: Fn(&[Value]) -> Result<Value, ArgumentError> {
 
 impl<F> EridaniFunction for F
 where
-    F: Fn(&[Value]) -> Result<Value, ArgumentError> + Clone,
+    F: FnMut(&[Value]) -> Result<Value, ArgumentError> + Clone,
 {
     fn clone_box<'a>(&self) -> Box<dyn 'a + EridaniFunction>
     where
@@ -77,7 +77,7 @@ macro_rules! internal_error {
 
 #[cfg(not(debug_assertions))]
 macro_rules! internal_error {
-    ( $( $tokens:tt )* ) => {
+    ( $( $tokens:expr )* ) => {
         panic!("internal compiler error")
     };
 }

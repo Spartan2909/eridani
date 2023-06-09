@@ -8,7 +8,7 @@ use clap::Parser;
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// The file to run
+    /// The file to compile and run
     file_path: String,
 
     /// Compile the given file without running it

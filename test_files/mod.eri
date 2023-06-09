@@ -3,13 +3,12 @@ module fib
 unused is
     () unused()
 
-greater is
-    (a: > b, b: Integer) 1
+even is
+    (n: % 2 == 0) 1
 
-    (a, b) 0
+    (n) 0
 
 main is
     () do
-        print(fibonacci in fib(10))
-        print(greater(3, 2))
+        print(greater in std(3, 2))
     end

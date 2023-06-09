@@ -1,9 +1,0 @@
-fibonacci is
-    (n: 0 | 1) n
-
-    (n: Integer & > 1) do
-        fibonacci(n - 1) + fibonacci(n - 2)
-    end
-
-main is
-    () fibonacci(31)

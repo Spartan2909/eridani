@@ -1,12 +1,16 @@
 use crate::{common::internal_error, prelude::*};
 
+#[cfg(feature = "tree_walk")]
 use alloc::rc::Rc;
+
 use core::{
-    cell::RefCell,
     cmp::Ordering,
     fmt,
     ops::{Add, Div, Mul, Neg, Rem, Sub},
 };
+
+#[cfg(feature = "tree_walk")]
+use core::cell::RefCell;
 
 #[derive(Debug, Clone)]
 pub enum Value {
