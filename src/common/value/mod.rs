@@ -33,7 +33,7 @@ type Method = Box<crate::compiler::analyser::Method>;
 
 #[cfg(not(feature = "tree_walk"))]
 #[derive(Debug, Clone)]
-struct Method;
+pub struct Method;
 
 impl From<Option<Value>> for Value {
     fn from(value: Option<Value>) -> Self {
