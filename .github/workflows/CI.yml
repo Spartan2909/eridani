@@ -18,8 +18,7 @@ jobs:
       fail-fast: false
       matrix:
         toolchain: [stable, nightly]
-        bin-feature: ['--features="bin"', '']
-        treewalk-feature: ['--features="tree_walk"', '']
+        features-1: ['--features="bin"', '--features="tree_walk"', '']
 
     steps:
     - uses: actions/checkout@v3
@@ -28,11 +27,11 @@ jobs:
         rustup toolchain add ${{ matrix.toolchain }} --component clippy
         rustup override set ${{ matrix.toolchain }}
     - name: Build
-      run: cargo build --verbose ${{ matrix.bin-feature }}
+      run: cargo build --verbose ${{ matrix.features-1 }}
     - name: Run tests
-      run: cargo test --verbose ${{ matrix.bin-feature }}
+      run: cargo test --verbose ${{ matrix.features-1 }}
     - name: Run Clippy
-      run: cargo clippy --verbose ${{ matrix.bin-feature }}
+      run: cargo clippy --verbose ${{ matrix.features-1 }}
   miri:
     name: Test with Miri
     runs-on: ubuntu-latest
