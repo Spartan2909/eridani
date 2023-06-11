@@ -19,6 +19,7 @@ jobs:
       matrix:
         toolchain: [stable, nightly]
         bin-feature: ['--features="bin"', '']
+        treewalk-feature: ['--features="tree_walk"', '']
 
     steps:
     - uses: actions/checkout@v3
