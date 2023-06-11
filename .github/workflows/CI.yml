@@ -10,17 +10,38 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
-    name: Build
+  test:
+    name: Test
     runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: [stable, nightly]
+        bin-feature: ['--features="bin"', '']
 
     steps:
     - uses: actions/checkout@v3
     - name: Setup
-      run: rustup default nightly && rustup component add clippy --toolchain nightly
+      run: |
+        rustup toolchain add ${{ matrix.toolchain }} --component clippy
+        rustup override set ${{ matrix.toolchain }}
     - name: Build
-      run: cargo build --verbose --features="bin"
+      run: cargo build --verbose ${{ matrix.bin-feature }}
     - name: Run tests
-      run: cargo test --verbose --features="bin"
+      run: cargo test --verbose ${{ matrix.bin-feature }}
     - name: Run Clippy
-      run: cargo clippy --verbose --features="bin"
+      run: cargo clippy --verbose ${{ matrix.bin-feature }}
+  miri:
+    name: Test with Miri
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+      - name: Setup
+        run: |
+          rustup toolchain add nightly --component miri
+          rustup override set nightly
+          cargo miri setup
+      - name: Run Miri
+        run: 'cargo miri test --workspace --features="bin" --verbose'
