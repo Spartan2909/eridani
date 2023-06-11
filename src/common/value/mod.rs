@@ -25,10 +25,14 @@ pub enum Value {
 #[cfg(feature = "tree_walk")]
 type Function = Rc<RefCell<crate::compiler::analyser::Function>>;
 
+#[cfg(not(feature = "tree_walk"))]
+type Function = u16;
+
 #[cfg(feature = "tree_walk")]
 type Method = Box<crate::compiler::analyser::Method>;
 
 #[cfg(not(feature = "tree_walk"))]
+#[derive(Debug, Clone)]
 struct Method;
 
 impl From<Option<Value>> for Value {
