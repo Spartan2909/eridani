@@ -15,13 +15,7 @@
 )]
 
 #[cfg(not(any(feature = "compiler", feature = "runtime")))]
-compile_error!("Either feature 'compiler' or feature 'runtime' must be enabled.");
-
-#[cfg(all(
-    not(feature = "compiler"),
-    any(feature = "target_std", feature = "target_web"),
-))]
-compile_error!("The 'target_*' features only affect the compiler.");
+compile_error!("Either feature 'compiler' or feature 'runtime' must be enabled");
 
 #[cfg(all(feature = "tree_walk", any(feature = "web", feature = "target_web")))]
 compile_error!("The treewalk interpreter cannot be used with web features");

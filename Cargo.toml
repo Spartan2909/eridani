@@ -14,9 +14,9 @@ default = ["compiler", "runtime", "std", "target_std"]
 compiler = []
 runtime = []
 web = ["runtime"]
-target_web = []
+target_web = ["compiler"]
 std = []
-target_std = []
+target_std = ["runtime"]
 tree_walk = ["compiler", "runtime", "std", "target_std"]
 bin = ["dep:clap", "tree_walk"]   # REMOVE DEPENDENCY ON TREE_WALK ONCE BYTECODE VM IS FINISHED
 
