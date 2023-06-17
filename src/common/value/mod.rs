@@ -1,4 +1,4 @@
-use crate::{common::internal_error, prelude::*};
+use crate::common::internal_error;
 
 #[cfg(feature = "tree_walk")]
 use alloc::rc::Rc;

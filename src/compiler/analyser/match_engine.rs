@@ -1,4 +1,4 @@
-use crate::{common::value::Value, compiler::analyser::pattern::Pattern, prelude::*};
+use crate::{common::value::Value, compiler::analyser::pattern::Pattern};
 
 use core::cell::RefCell;
 
@@ -114,10 +114,7 @@ pub(crate) fn match_args(
         return Ok(None);
     }
 
-    let names: Vec<u16> = patterns
-        .iter()
-        .filter_map(|(name, _)| *name)
-        .collect();
+    let names: Vec<u16> = patterns.iter().filter_map(|(name, _)| *name).collect();
 
     let order = resolve_metapatterns(patterns, &names)?;
 

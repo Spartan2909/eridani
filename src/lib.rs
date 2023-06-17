@@ -22,14 +22,13 @@ compile_error!("The treewalk interpreter cannot be used with web features");
 
 extern crate alloc;
 
-mod prelude {
-    pub use alloc::{
-        boxed::Box,
-        format,
-        string::{String, ToString},
-        vec,
-        vec::Vec,
-    };
+#[cfg(feature = "ffi")]
+pub mod ffi {
+    pub use crate::common::{value::Value, ArgumentError, EridaniFunction, VersionData};
+
+    use crate::common::{RustChannel, RustVersionData};
+
+    include!(concat!(env!("OUT_DIR"), "/eridani_version_data.rs"));
 }
 
 mod common;

@@ -1,7 +1,9 @@
 mod match_engine;
+mod modules;
 mod pattern;
 
 pub(crate) use match_engine::match_args;
+use modules::{get_library, resolve_import, Module, Visibility};
 
 use crate::{
     common::{internal_error, natives, value::Value, EridaniFunction},
@@ -11,19 +13,75 @@ use crate::{
         scanner::{self, TokenType},
         Error, Result,
     },
-    prelude::*,
 };
 
-use alloc::{
-    collections::BTreeMap,
-    rc::{Rc, Weak},
-};
+use alloc::{collections::BTreeMap, rc::Rc};
 use core::{cell::RefCell, fmt, ptr::NonNull};
 
-#[cfg(not(feature = "no_std"))]
-use std::{fs, path};
-
 use bimap::BiMap;
+
+pub struct Program {
+    entry_point: Rc<RefCell<Function>>,
+    functions: Vec<Rc<RefCell<Function>>>,
+    #[cfg(feature = "std")]
+    libraries: Vec<NonNull<Library>>,
+}
+
+impl Program {
+    fn new(entry_point: Rc<RefCell<Function>>, functions: Vec<Rc<RefCell<Function>>>) -> Program {
+        Program {
+            entry_point,
+            functions,
+            #[cfg(feature = "std")]
+            libraries: vec![],
+        }
+    }
+
+    pub(crate) fn entry_point(&self) -> &Rc<RefCell<Function>> {
+        &self.entry_point
+    }
+
+    pub(crate) fn functions(&self) -> &Vec<Rc<RefCell<Function>>> {
+        &self.functions
+    }
+
+    #[cfg(feature = "std")]
+    pub(crate) fn libraries(&mut self) -> Vec<NonNull<Library>> {
+        let libraries = self.libraries.clone();
+        self.libraries = vec![];
+        libraries
+    }
+
+    #[cfg(feature = "std")]
+    fn push_library(&mut self, library: NonNull<Library>) {
+        self.libraries.push(library);
+    }
+
+    #[cfg(feature = "no_std")]
+    fn push_library<T>(&self, _library: T) {}
+}
+
+impl Drop for Program {
+    fn drop(&mut self) {
+        for function in &self.functions {
+            if let Ok(mut function) = function.try_borrow_mut() {
+                function.destroy();
+            }
+        }
+
+        #[cfg(feature = "std")]
+        for &library in &self.libraries {
+            // SAFETY: this is the only pointer to this value
+            unsafe { Box::from_raw(library.as_ptr()) };
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+type Library = libloading::Library;
+
+#[cfg(not(feature = "std"))]
+type Library = ();
 
 #[derive(Debug, Clone, Copy)]
 enum FunctionKind {
@@ -126,10 +184,10 @@ impl Function {
         }
     }
 
-    fn resolve_placeholders(&self, module: &Rc<RefCell<Module>>) -> Result<()> {
+    fn resolve_placeholders(&self) -> Result<()> {
         if let Function::Eridani { methods, .. } = self {
             for method in methods {
-                method.borrow_mut().body.resolve_placeholders(module)?;
+                method.borrow_mut().body.resolve_placeholders()?;
             }
         }
 
@@ -164,36 +222,16 @@ impl Function {
         }
     }
 
-    fn clear(&mut self) {
-        if let Function::Eridani { methods, .. } = self {
-            *methods = vec![];
-        }
-    }
-
     fn kind(&self) -> FunctionKind {
         match self {
             Function::Eridani { .. } => FunctionKind::Eridani,
             Function::Rust { .. } => FunctionKind::Rust,
         }
     }
-}
 
-pub struct Program(Rc<RefCell<Function>>, Vec<Rc<RefCell<Function>>>);
-
-impl Program {
-    pub(crate) fn entry_point(&self) -> &Rc<RefCell<Function>> {
-        &self.0
-    }
-
-    pub(crate) fn functions(&self) -> &Vec<Rc<RefCell<Function>>> {
-        &self.1
-    }
-}
-
-impl Drop for Program {
-    fn drop(&mut self) {
-        for function in &self.1 {
-            function.borrow_mut().clear();
+    fn destroy(&mut self) {
+        if let Function::Eridani { methods, .. } = self {
+            *methods = vec![];
         }
     }
 }
@@ -274,10 +312,6 @@ impl Environment {
         })
     }
 
-    pub fn variables(&self) -> &BiMap<String, u16> {
-        &self.variables
-    }
-
     fn new_reference(&self) -> u16 {
         if let Some(reference) = self.variables.right_values().max() {
             *reference + 1
@@ -313,9 +347,14 @@ impl Environment {
             None
         }
     }
+}
 
-    pub fn names(&self) -> Vec<&String> {
-        self.variables.left_values().collect()
+#[derive(Clone, PartialEq)]
+pub(crate) struct PlaceHolderModule(Rc<RefCell<Module>>);
+
+impl fmt::Debug for PlaceHolderModule {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(&self.0, f)
     }
 }
 
@@ -354,7 +393,7 @@ pub(crate) enum Expr {
         line: usize,
     },
     Method(Box<Method>),
-    PlaceHolder(ImportTree),
+    PlaceHolder(ImportTree, PlaceHolderModule),
     Unary {
         operator: UnOp,
         right: Box<Self>,
@@ -366,62 +405,66 @@ pub(crate) enum Expr {
 }
 
 impl Expr {
-    fn resolve_placeholders(&mut self, module: &Rc<RefCell<Module>>) -> Result<()> {
+    fn resolve_placeholders(&mut self) -> Result<()> {
         match self {
             Self::Binary { left, right, .. } => {
-                left.resolve_placeholders(module)?;
-                right.resolve_placeholders(module)?;
+                left.resolve_placeholders()?;
+                right.resolve_placeholders()?;
             }
             Self::Block { body, .. } => {
                 for expr in body {
-                    expr.resolve_placeholders(module)?;
+                    expr.resolve_placeholders()?;
                 }
             }
             Self::Call {
                 callee, arguments, ..
             } => {
-                callee.resolve_placeholders(module)?;
+                callee.resolve_placeholders()?;
                 for expr in arguments {
-                    expr.resolve_placeholders(module)?;
+                    expr.resolve_placeholders()?;
                 }
             }
             Self::Function { .. } => {}
-            Self::Grouping(expr) => expr.resolve_placeholders(module)?,
-            Self::Let { value, .. } => value.resolve_placeholders(module)?,
+            Self::Grouping(expr) => expr.resolve_placeholders()?,
+            Self::Let { value, .. } => value.resolve_placeholders()?,
             Self::List { expressions, .. } => {
                 for expr in expressions {
-                    expr.resolve_placeholders(module)?;
+                    expr.resolve_placeholders()?;
                 }
             }
             Self::Literal { .. } => {}
-            Self::Method(method) => method.body.resolve_placeholders(module)?,
-            Self::PlaceHolder(placeholder) => {
-                if placeholder.next().is_some() {
-                    unreachable!("currently no way to create a placeholder from an import tree");
-                } else {
-                    let function = if let Some(function) =
-                        module.borrow().find_function(placeholder.name().lexeme())
-                    {
-                        function
-                    } else if let Some(binding) =
-                        module.borrow().bindings.get(placeholder.name().lexeme())
-                    {
-                        if let Binding::Function(f) = binding {
-                            f.clone()
-                        } else {
-                            internal_error!("placeholder pointing to module")
-                        }
+            Self::Method(method) => method.body.resolve_placeholders()?,
+            Self::PlaceHolder(placeholder, containing_module) => {
+                let containing_module = &containing_module.0;
+                let function = if let Some(function) = containing_module
+                    .borrow()
+                    .find_function(placeholder.name().lexeme())
+                {
+                    function
+                } else if let Some(binding) = containing_module
+                    .borrow()
+                    .bindings()
+                    .get(placeholder.name().lexeme())
+                {
+                    if let Binding::Function(f) = binding {
+                        f.clone()
                     } else {
-                        internal_error!("dangling placeholder")
-                    };
+                        internal_error!("placeholder pointing to module")
+                    }
+                } else {
+                    internal_error!(
+                        "dangling placeholder {:?} in module '{}'",
+                        placeholder,
+                        containing_module.borrow().name()
+                    )
+                };
 
-                    *self = Self::Function {
-                        function,
-                        line: placeholder.line(),
-                    };
-                }
+                *self = Self::Function {
+                    function,
+                    line: placeholder.line(),
+                };
             }
-            Self::Unary { right, .. } => right.resolve_placeholders(module)?,
+            Self::Unary { right, .. } => right.resolve_placeholders()?,
             Self::Variable { .. } => {}
         }
 
@@ -467,7 +510,7 @@ impl Expr {
             }
             Self::Literal { .. } => vec![],
             Self::Method(method) => method.body.calls(),
-            Self::PlaceHolder(_) => internal_error!("called 'calls' on placeholder"),
+            Self::PlaceHolder(_, _) => internal_error!("called 'calls' on placeholder"),
             Self::Unary { right, .. } => right.calls(),
             Self::Variable { .. } => vec![],
         }
@@ -496,7 +539,7 @@ impl Expr {
             }
             Expr::Literal { line, .. } => *line,
             Expr::Method(method) => method.body.line(),
-            Expr::PlaceHolder(placeholder) => placeholder.line(),
+            Expr::PlaceHolder(placeholder, _) => placeholder.line(),
             Expr::Unary { right, .. } => right.line(),
             Expr::Variable { line, .. } => *line,
         }
@@ -559,9 +602,10 @@ impl fmt::Debug for Expr {
                 .field("line", line)
                 .finish(),
             Expr::Method(method) => f.debug_tuple("Expr::Method").field(method).finish(),
-            Expr::PlaceHolder(placeholder) => f
+            Expr::PlaceHolder(placeholder, module) => f
                 .debug_tuple("Expr::Placeholder")
                 .field(placeholder)
+                .field(module)
                 .finish(),
             Expr::Unary { operator, right } => f
                 .debug_struct("Expr::Unary")
@@ -600,222 +644,17 @@ impl Calls {
 enum Binding {
     Function(Rc<RefCell<Function>>),
     Module(Rc<RefCell<Module>>),
+    PlaceHolder(String, Rc<RefCell<Module>>),
 }
 
 impl Binding {
     fn name(&self) -> String {
         match self {
             Binding::Function(f) => f.borrow().name().to_string(),
-            Binding::Module(m) => m.borrow().name.clone(),
+            Binding::Module(m) => m.borrow().name().clone(),
+            Binding::PlaceHolder(name, _) => name.clone(),
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Visibility {
-    Public,
-    Private,
-}
-
-#[derive(Debug)]
-struct Module {
-    name: String,
-    submodules: Vec<(Rc<RefCell<Module>>, Visibility)>,
-    functions: Vec<Rc<RefCell<Function>>>,
-    function_names: Vec<String>,
-    bindings: BTreeMap<String, Binding>,
-    supermodule: Weak<RefCell<Module>>,
-}
-
-impl Module {
-    fn new(name: &str, bindings: BTreeMap<String, Binding>) -> Module {
-        Module {
-            name: name.to_string(),
-            submodules: vec![],
-            functions: vec![],
-            function_names: vec![],
-            bindings,
-            supermodule: Weak::new(),
-        }
-    }
-
-    fn find(&self, name: &str, looking_from_module_tree: bool) -> Option<Binding> {
-        if let Some(module) = self.find_module(name, looking_from_module_tree) {
-            Some(Binding::Module(Rc::clone(module)))
-        } else {
-            self.find_function(name).map(Binding::Function)
-        }
-    }
-
-    fn find_module(
-        &self,
-        name: &str,
-        looking_from_module_tree: bool,
-    ) -> Option<&Rc<RefCell<Module>>> {
-        if let Some(Binding::Module(module)) = self.bindings.get(name) {
-            return Some(module);
-        }
-        for (submodule, visibility) in &self.submodules {
-            if submodule.borrow().name == name
-                && (looking_from_module_tree || *visibility == Visibility::Public)
-            {
-                return Some(submodule);
-            }
-        }
-
-        None
-    }
-
-    fn find_function(&self, name: &str) -> Option<Rc<RefCell<Function>>> {
-        for function in &self.functions {
-            if function.borrow().name() == name {
-                return Some(Rc::clone(function));
-            }
-        }
-
-        None
-    }
-
-    fn destroy(&mut self) {
-        for (submodule, _) in &self.submodules {
-            if let Ok(mut submodule) = submodule.try_borrow_mut() {
-                submodule.destroy();
-            }
-        }
-        self.submodules = vec![];
-        self.functions = vec![];
-        for binding in self.bindings.values() {
-            if let Binding::Module(module) = binding {
-                if let Ok(mut module) = module.try_borrow_mut() {
-                    module.destroy();
-                }
-            }
-        }
-        self.bindings = BTreeMap::new();
-    }
-}
-
-/// Returns the module, and the path to the file containing that code, if it exists
-fn resolve_module(
-    name: &str,
-    importing_module: Rc<RefCell<Module>>,
-    _modules: &mut [Rc<RefCell<Module>>],
-    line: usize,
-) -> Result<(Rc<RefCell<Module>>, bool)> {
-    if let Some(module) = importing_module.borrow().find_module(name, true) {
-        return Ok((Rc::clone(module), true));
-    }
-
-    let location = format!(" at {name}");
-    Err(Error::new(
-        line,
-        "Import",
-        &location,
-        "Cannot resolve module",
-    ))
-}
-
-/// Returns the module, and the path to the file containing that code, if it exists
-fn resolve_submodule(
-    name: &str,
-    line: usize,
-    supermodule_origin: Option<&str>,
-) -> Result<(String, String)> {
-    #[cfg(not(feature = "no_std"))]
-    if let Some(supermodule_origin) = supermodule_origin {
-        let supermodule_origin = path::PathBuf::from(supermodule_origin);
-        let supermodule_filename = supermodule_origin
-            .file_name()
-            .unwrap_or_else(|| internal_error!("set invalid module path"));
-        let supermodule_folder = supermodule_origin
-            .parent()
-            .unwrap_or_else(|| internal_error!("set invalid module path"));
-        if supermodule_filename == "mod.eri" {
-            let mut module_file = supermodule_folder.to_owned();
-            let file_name = path::PathBuf::from(format!("{name}.eri"));
-            module_file.push(file_name);
-            if module_file.try_exists().unwrap_or(false) {
-                let contents = fs::read_to_string(&module_file)
-                    .unwrap_or_else(|_| internal_error!("read from invalid file"));
-                return Ok((contents, module_file.to_string_lossy().into()));
-            }
-            let mut module_in_folder = supermodule_folder.to_owned();
-            let file_name = path::PathBuf::from(format!("{name}/mod.eri"));
-            module_in_folder.push(file_name);
-            if module_file.try_exists().unwrap_or(false) {
-                let contents = fs::read_to_string(&module_file)
-                    .unwrap_or_else(|_| internal_error!("read from invalid file"));
-                return Ok((contents, module_in_folder.to_string_lossy().into()));
-            }
-        }
-    }
-
-    let location = format!(" at {name}");
-    Err(Error::new(
-        line,
-        "Import",
-        &location,
-        "Cannot resolve submodule",
-    ))
-}
-
-fn resolve_import(
-    mut import: ImportTree,
-    mut import_module: Rc<RefCell<Module>>,
-    looking_from_module_tree: bool,
-) -> Result<Binding> {
-    let mut binding = Binding::Module(Rc::clone(&import_module));
-    while let Some(next) = import.next() {
-        let tmp: &ImportTree = next;
-        import = tmp.clone();
-
-        if import.name().kind() == TokenType::Super {
-            let supermodule =
-                import_module
-                    .borrow()
-                    .supermodule
-                    .upgrade()
-                    .unwrap_or(Err(Error::new(
-                        import.line(),
-                        "Import",
-                        "",
-                        "'super' used in top-level module",
-                    ))?);
-            binding = Binding::Module(Rc::clone(&supermodule));
-            import_module = supermodule;
-        } else {
-            binding = match import_module
-                .borrow()
-                .find(import.name().lexeme(), looking_from_module_tree)
-            {
-                Some(binding) => binding,
-                None => {
-                    return Err(Error::new(
-                        import.line(),
-                        "Import",
-                        &format!(" at '{}'", import.name().lexeme()),
-                        "No such item",
-                    ));
-                }
-            };
-
-            if import.next().is_some() {
-                if let Binding::Module(module) = &binding {
-                    import_module = Rc::clone(module);
-                } else if let Binding::Function(_) = &binding {
-                    let location = format!(" at {}", import.name().lexeme());
-                    return Err(Error::new(
-                        import.line(),
-                        "Import",
-                        &location,
-                        "Cannot import from function",
-                    ));
-                }
-            }
-        }
-    }
-
-    Ok(binding)
 }
 
 #[allow(clippy::type_complexity)]
@@ -828,38 +667,41 @@ fn get_std() -> Result<(Vec<Rc<RefCell<Module>>>, BTreeMap<String, Binding>)> {
     #[cfg(feature = "target_web")]
     (eridani_std += super::eridani_std::ERIDANI_STD_FEATURE_WEB);
 
-    let natives_module = Rc::new(RefCell::new(Module::new("internals", BTreeMap::new())));
+    let std_module = Rc::new(RefCell::new(Module::new(
+        "std",
+        BTreeMap::new(),
+        None,
+        None,
+    )));
+
+    let natives_module = Rc::new(RefCell::new(Module::new(
+        "internals",
+        BTreeMap::new(),
+        None,
+        Some(&std_module),
+    )));
     for (name, func) in natives::NATIVES {
         natives_module
             .borrow_mut()
-            .functions
-            .push(Rc::new(RefCell::new(Function::Rust {
+            .push_function(Rc::new(RefCell::new(Function::Rust {
                 name: name.to_string(),
                 func: Box::new(func),
             })));
     }
 
-    let std_module = Rc::new(RefCell::new(Module::new("std", BTreeMap::new())));
     std_module
         .borrow_mut()
-        .submodules
-        .push((Rc::clone(&natives_module), Visibility::Private));
+        .push_submodule(Rc::clone(&natives_module), Visibility::Private);
 
     let mut modules = vec![Rc::clone(&std_module), Rc::clone(&natives_module)];
 
     let eridani_std = parser::parse(scanner::scan(&eridani_std)?)?;
-    analyse_module(
-        eridani_std,
-        None,
-        Rc::clone(&std_module),
-        &mut modules,
-        &BTreeMap::new(),
-    )?;
+    analyse_module(eridani_std, &std_module, &mut modules)?;
 
     let prelude = super::eridani_std::PRELUDE;
     let mut bindings = BTreeMap::new();
     bindings.insert("std".to_string(), Binding::Module(Rc::clone(&std_module)));
-    for function in std_module.borrow().functions.iter() {
+    for function in std_module.borrow().functions() {
         if prelude.contains(&function.borrow().name().as_str()) {
             bindings.insert(
                 function.borrow().name().to_string(),
@@ -947,22 +789,18 @@ fn verify_pattern(pattern: &Pattern, line: usize) -> Result<()> {
 
 pub fn analyse(
     parse_tree: ParseTree,
-    source_origin: Option<&str>,
+    source_origin: Option<String>,
     entry_point: &str,
 ) -> Result<Program> {
     let (mut modules, default_bindings) = get_std()?;
     let root_module = Rc::new(RefCell::new(Module::new(
         "",
         clone_bindings(&default_bindings),
+        source_origin,
+        None,
     )));
     modules.push(Rc::clone(&root_module));
-    analyse_module(
-        parse_tree,
-        source_origin,
-        Rc::clone(&root_module),
-        &mut modules,
-        &default_bindings,
-    )?;
+    analyse_module(parse_tree, &root_module, &mut modules)?;
 
     let entry_point = match root_module.borrow().find_function(entry_point) {
         Some(entry_point) => entry_point,
@@ -972,78 +810,76 @@ pub fn analyse(
         }
     };
 
-    for module in modules {
-        module.borrow_mut().destroy();
+    let mut all_functions: Vec<Rc<RefCell<Function>>> = vec![];
+
+    for module in &modules {
+        module.borrow().resolve_placeholders()?;
+        for function in module.borrow().functions() {
+            if !all_functions
+                .iter()
+                .any(|f| f.as_ptr() as usize == function.as_ptr() as usize)
+            {
+                all_functions.push(Rc::clone(function));
+            }
+        }
     }
 
     let mut calls = Calls::new();
     calls.push(Rc::clone(&entry_point));
     let functions = calls.calls;
 
-    Ok(Program(entry_point, functions))
+    for function in all_functions {
+        if !functions.contains(&function) {
+            function.borrow_mut().destroy();
+        }
+    }
+
+    let mut program = Program::new(entry_point, functions);
+
+    for module in modules {
+        if let Some(library) = get_library(module.borrow_mut()) {
+            program.push_library(library);
+        }
+        module.borrow_mut().destroy();
+    }
+
+    Ok(program)
 }
 
 fn analyse_module(
     parse_tree: ParseTree,
-    source_origin: Option<&str>,
-    module: Rc<RefCell<Module>>,
+    module: &Rc<RefCell<Module>>,
     modules: &mut Vec<Rc<RefCell<Module>>>,
-    bindings: &BTreeMap<String, Binding>,
 ) -> Result<()> {
+    module.borrow_mut().init_names(&parse_tree);
+
     for (public, module_name) in parse_tree.modules() {
-        let public = if public.is_some() {
+        let visibility = if public.is_some() {
             Visibility::Public
         } else {
             Visibility::Private
         };
-        let (submodule, submodule_origin) =
-            resolve_submodule(module_name.lexeme(), module_name.line(), source_origin)?;
-        let submodule_parse_tree = parser::parse(scanner::scan(&submodule)?)?;
-        let submodule = Rc::new(RefCell::new(Module::new(
+        Module::resolve_submodule(
+            module,
             module_name.lexeme(),
-            clone_bindings(bindings),
-        )));
-        modules.push(Rc::clone(&submodule));
-        module
-            .borrow_mut()
-            .submodules
-            .push((Rc::clone(&submodule), public));
-        module.borrow_mut().bindings.insert(
-            module_name.lexeme().to_string(),
-            Binding::Module(Rc::clone(&submodule)),
-        );
-        analyse_module(
-            submodule_parse_tree,
-            Some(&submodule_origin),
-            Rc::clone(&submodule),
+            module_name.line(),
             modules,
-            bindings,
+            visibility,
         )?;
     }
 
     for import in parse_tree.imports() {
-        let (imported_module, in_module_tree) = resolve_module(
-            import.name().lexeme(),
-            Rc::clone(&module),
-            modules,
-            import.line(),
-        )?;
+        let (imported_module, in_module_tree) =
+            module.borrow().find_imported_module(import.name())?;
         modules.push(Rc::clone(&imported_module));
 
         let binding = resolve_import(import.clone(), Rc::clone(&imported_module), in_module_tree)?;
 
-        module.borrow_mut().bindings.insert(binding.name(), binding);
-    }
-
-    for function in parse_tree.functions() {
-        module
-            .borrow_mut()
-            .function_names
-            .push(function.name().lexeme().to_string());
+        module.borrow_mut().add_binding(binding.name(), binding);
     }
 
     for (i, function) in parse_tree.functions().iter().enumerate() {
-        let name = module.borrow().function_names[i].clone();
+        let name = module.borrow().function_name(i).clone();
 
         let mut methods = vec![];
         for method in function.methods() {
@@ -1080,7 +916,7 @@ fn analyse_module(
                 .map(|((_, pattern), reference)| (reference, pattern))
                 .collect();
 
-            let body = convert_expr(method.body(), Rc::clone(&module), &mut environment, modules)?;
+            let body = convert_expr(method.body(), Rc::clone(module), &mut environment, modules)?;
 
             methods.push(RefCell::new(Method {
                 args,
@@ -1091,12 +927,7 @@ fn analyse_module(
 
         module
             .borrow_mut()
-            .functions
-            .push(Rc::new(RefCell::new(Function::Eridani { name, methods })));
-    }
-
-    for function in &module.borrow().functions {
-        function.borrow().resolve_placeholders(&module)?;
+            .push_function(Rc::new(RefCell::new(Function::Eridani { name, methods })));
     }
 
     Ok(())
@@ -1242,15 +1073,18 @@ fn convert_expr(
             }
         }
         ParseExpr::Variable(var) => {
-            let expr = if var.next().is_some() {
+            if var.next().is_some() {
                 let (import_module, looking_from_module_tree) =
-                    resolve_module(var.name().lexeme(), module, modules, var.name().line())?;
+                    module.borrow().find_imported_module(var.name())?;
                 let item = resolve_import(var.clone(), import_module, looking_from_module_tree)?;
 
-                let function = match item {
-                    Binding::Function(f) => f,
+                match item {
+                    Binding::Function(function) => Expr::Function {
+                        function,
+                        line: var.line(),
+                    },
                     Binding::Module(module) => {
-                        let location = format!(" at {}", module.borrow().name);
+                        let location = format!(" at {}", module.borrow().name());
                         return Err(Error::new(
                             var.line(),
                             "Import",
@@ -1258,11 +1092,9 @@ fn convert_expr(
                             "Expected function, found module",
                         ));
                     }
-                };
-
-                Expr::Function {
-                    function,
-                    line: var.line(),
+                    Binding::PlaceHolder(_, module) => {
+                        Expr::PlaceHolder(var.last().to_owned(), PlaceHolderModule(module))
+                    }
                 }
             } else if let Some(reference) = environment.get(var.name().lexeme()) {
                 Expr::Variable {
@@ -1271,13 +1103,16 @@ fn convert_expr(
                 }
             } else if module
                 .borrow()
-                .function_names
-                .contains(&var.name().lexeme().to_string())
+                .function_names()
+                .contains(var.name().lexeme())
             {
-                Expr::PlaceHolder(var.clone())
-            } else if let Some(binding) = module.borrow().bindings.get(var.name().lexeme()) {
-                if let Binding::Function(_) = binding {
-                    Expr::PlaceHolder(var.clone())
+                Expr::PlaceHolder(var.clone(), PlaceHolderModule(module))
+            } else if let Some(binding) = module.borrow().bindings().get(var.name().lexeme()) {
+                if let Binding::Function(function) = binding {
+                    Expr::Function {
+                        function: Rc::clone(function),
+                        line: var.line(),
+                    }
                 } else {
                     let location = format!(" at {}", var.name().lexeme());
                     return Err(Error::new(
@@ -1296,9 +1131,7 @@ fn convert_expr(
                 let location = format!(" at {}", var.name().lexeme());
                 let message = format!("Unknown name '{}'", var.name().lexeme());
                 return Err(Error::new(var.line(), "Name", &location, &message));
-            };
-
-            expr
+            }
         }
     };
 

@@ -6,7 +6,7 @@ use core::error;
 #[cfg(feature = "std")]
 use std::error;
 
-use crate::{common::ArgumentError, prelude::*};
+use crate::common::ArgumentError;
 
 #[cfg(feature = "tree_walk")]
 pub(crate) mod treewalk;

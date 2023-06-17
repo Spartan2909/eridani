@@ -1,7 +1,5 @@
 use core::fmt;
 
-use crate::prelude::*;
-
 use super::{Error, Result};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

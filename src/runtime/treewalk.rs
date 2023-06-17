@@ -1,7 +1,6 @@
 use crate::{
     common::{internal_error, value::Value, EridaniFunction},
     compiler::analyser::{match_args, BinOp, Expr, Function, Program, UnOp},
-    prelude::*,
     runtime::{EridaniResult, Error, Result},
 };
 
@@ -133,8 +132,12 @@ fn expr(
         }
         Expr::Literal { value, .. } => Ok((value, variables)),
         Expr::Method(method) => Ok((Value::Method(method), variables)),
-        Expr::PlaceHolder(placeholder) => {
-            internal_error!("placeholder '{:?}' at runtime", placeholder)
+        Expr::PlaceHolder(placeholder, module) => {
+            internal_error!(
+                "placeholder '{:?}' in '{:?}' at runtime",
+                placeholder,
+                module
+            )
         }
         Expr::Unary { operator, right } => {
             let (right, variables) = expr(*right, variables, function_name)?;
@@ -206,10 +209,17 @@ fn function(
         .collect();
 
     if matches.is_empty() {
+        let mut args_buf = String::with_capacity(args.len() * 6);
+        for (i, arg) in args.iter().enumerate() {
+            args_buf.push_str(&format!("{arg}"));
+            if i + 1 < args.len() {
+                args_buf.push_str(", ");
+            }
+        }
         let message = format!(
-            "Function '{}' has no methods that match the arguments {:?}",
+            "Function '{}' has no methods that match the arguments ({})",
             function.borrow().name(),
-            args
+            args_buf
         );
         Err(Error::new("Match", &message, line)).extend_trace(function_name, line)
     } else if matches.len() == 1 {

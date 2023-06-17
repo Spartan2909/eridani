@@ -8,6 +8,7 @@ rust-version = "1.64"
 [dependencies]
 bimap = { version = "0.6", default-features = false }
 clap = { version = "4.1", features = ["derive"], optional = true }
+libloading = { version = "0.8", optional = true }
 strum = { version = "0.24", default-features = false, features = ["derive"] }
 
 [features]
@@ -16,8 +17,9 @@ compiler = []
 runtime = []
 web = ["runtime"]
 target_web = ["compiler"]
-std = []
+std = ["dep:libloading"]
 target_std = ["runtime"]
+ffi = []
 tree_walk = ["compiler", "runtime", "std", "target_std"]
 bin = ["dep:clap", "tree_walk"]   # REMOVE DEPENDENCY ON TREE_WALK ONCE BYTECODE VM IS FINISHED
 

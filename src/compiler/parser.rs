@@ -1,9 +1,6 @@
-use crate::{
-    compiler::{
-        scanner::{OptionalKind, Token, TokenType},
-        Error, Result,
-    },
-    prelude::*,
+use crate::compiler::{
+    scanner::{OptionalKind, Token, TokenType},
+    Error, Result,
 };
 
 #[derive(Debug, Clone)]
@@ -228,6 +225,14 @@ impl ImportTree {
             next.push(name);
         } else {
             self.next = Some(Box::new(Self { name, next: None }));
+        }
+    }
+
+    pub(crate) fn last(&self) -> &ImportTree {
+        if let Some(next) = &self.next {
+            next.last()
+        } else {
+            self
         }
     }
 }

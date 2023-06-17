@@ -1,10 +1,7 @@
 use crate::common::{value::Value, ArgumentError};
 
 mod basic {
-    use crate::{
-        common::{get, value::Value, ArgumentError},
-        prelude::*,
-    };
+    use crate::common::{get, value::Value, ArgumentError};
 
     pub fn index(args: &[Value]) -> Result<Value, ArgumentError> {
         let list = get(args, 0)?;
@@ -46,10 +43,7 @@ mod basic {
 
 #[cfg(feature = "std")]
 mod feature_std {
-    use crate::{
-        common::{get, get_string, value::Value, ArgumentError},
-        prelude::*,
-    };
+    use crate::common::{get, get_string, value::Value, ArgumentError};
 
     use std::io::{self, Write};
 

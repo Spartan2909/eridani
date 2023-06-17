@@ -5,7 +5,6 @@ use crate::{
         parser,
         scanner::{Token, TokenType},
     },
-    prelude::*,
 };
 
 use strum::EnumCount;
@@ -477,65 +476,11 @@ impl Pattern {
         }
     }
 
-    pub fn is_binary(&self) -> bool {
-        matches!(self, Pattern::Binary { .. })
-    }
-
-    pub fn is_comparison(&self) -> bool {
-        matches!(self, Pattern::Comparision { .. })
-    }
-
-    pub fn is_list(&self) -> bool {
-        matches!(self, Pattern::List { .. })
-    }
-
     pub fn is_literal(&self, bindings: &[Option<u16>]) -> bool {
         if let Pattern::Wildcard(name) = self {
             bindings.contains(&name.as_ref().map(|var| var.reference()))
         } else {
             matches!(self, Pattern::Literal(_))
-        }
-    }
-
-    pub fn becomes_literal(&self) -> bool {
-        if let Pattern::Binary {
-            left,
-            operator,
-            right,
-        } = self
-        {
-            left.is_literal(&[]) && right.is_literal(&[]) && *operator == LogOp::And
-        } else {
-            false
-        }
-    }
-
-    pub fn is_operator_comparison(&self) -> bool {
-        matches!(self, Pattern::OperatorComparison { .. })
-    }
-
-    pub fn is_type(&self) -> bool {
-        matches!(self, Pattern::Type(_))
-    }
-
-    pub fn is_wildcard(&self, bindings: &[Option<u16>]) -> bool {
-        if let Pattern::Wildcard(name) = self {
-            !bindings.contains(&name.as_ref().map(|var| var.reference()))
-        } else {
-            false
-        }
-    }
-
-    pub fn becomes_wildcard(&self) -> bool {
-        if let Pattern::Binary {
-            left,
-            operator,
-            right,
-        } = self
-        {
-            left.is_wildcard(&[]) && right.is_wildcard(&[]) && *operator == LogOp::Or
-        } else {
-            false
         }
     }
 }

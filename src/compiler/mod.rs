@@ -6,8 +6,6 @@ use core::error;
 #[cfg(feature = "std")]
 use std::error;
 
-use crate::prelude::*;
-
 pub(crate) mod analyser;
 mod eridani_std;
 pub(crate) mod parser;
@@ -62,10 +60,10 @@ impl Error {
 pub type Result<T> = result::Result<T, Error>;
 
 #[cfg(feature = "tree_walk")]
-pub(crate) use analyser::{Function, Program};
+pub(crate) use analyser::Program;
 
 #[cfg(feature = "tree_walk")]
-pub fn parse(source: &str, source_origin: Option<&str>, entry_point: &str) -> Result<Program> {
+pub fn parse(source: &str, source_origin: Option<String>, entry_point: &str) -> Result<Program> {
     let tokens = scanner::scan(source)?;
     let parse_tree = parser::parse(tokens)?;
     analyser::analyse(parse_tree, source_origin, entry_point)

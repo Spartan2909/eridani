@@ -39,7 +39,11 @@ fn main() -> ExitCode {
     #[cfg(debug_assertions)]
     let start = Instant::now();
 
-    let program = match eridani::parse(&contents, file_path.to_str(), &entry_point) {
+    let program = match eridani::parse(
+        &contents,
+        Some(file_path.to_string_lossy().into()),
+        &entry_point,
+    ) {
         Ok(tree) => tree,
         Err(e) => {
             eprintln!("{e}");
