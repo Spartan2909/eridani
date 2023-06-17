@@ -70,7 +70,7 @@ pub fn parse(source: &str, source_origin: Option<String>, entry_point: &str) -> 
 }
 
 #[cfg(not(feature = "tree_walk"))]
-pub fn compile(source: &str, source_origin: Option<&str>, entry_point: &str) -> Result<()> {
+pub fn compile(source: &str, source_origin: Option<String>, entry_point: &str) -> Result<()> {
     let tokens = scanner::scan(source)?;
     let parse_tree = parser::parse(tokens)?;
     let _analysed = analyser::analyse(parse_tree, source_origin, entry_point)?;
