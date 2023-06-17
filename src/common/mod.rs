@@ -41,7 +41,11 @@ pub fn get_string(args: &[Value], index: usize) -> Result<String, ArgumentError>
     }
 }
 
+/// A function that can be called from eridani code.
+///
+/// Automatically implemented for Rust functions and `FnMut` closures.
 pub trait EridaniFunction: FnMut(&[Value]) -> Result<Value, ArgumentError> {
+    /// Returns a `Box` containing a clone of this value.
     fn clone_box<'a>(&self) -> Box<dyn 'a + EridaniFunction>
     where
         Self: 'a;
@@ -109,12 +113,16 @@ impl PartialEq for VersionData {
 
 #[cfg(debug_assertions)]
 macro_rules! internal_error {
+    () => {
+        panic!("internal compiler error")
+    };
+
     ( $str:expr ) => {
         panic!(concat!("internal compiler error: ", $str))
     };
 
-    ( $str:expr, $( $arg:expr )* ) => {
-        panic!(concat!("internal compiler error: ", $str), $( $arg )*)
+    ( $str:expr, $( $arg:expr ),+ ) => {
+        panic!(concat!("internal compiler error: ", $str), $( $arg ),+)
     };
 }
 
