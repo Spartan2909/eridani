@@ -11,6 +11,9 @@ clap = { version = "4.1", features = ["derive"], optional = true }
 libloading = { version = "0.8", optional = true }
 strum = { version = "0.24", default-features = false, features = ["derive"] }
 
+[build-dependencies]
+rustc_version = "0.4"
+
 [features]
 default = ["compiler", "runtime", "std", "target_std"]
 compiler = []

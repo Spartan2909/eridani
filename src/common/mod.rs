@@ -65,6 +65,48 @@ impl<'a> Clone for Box<dyn 'a + EridaniFunction> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
+pub(crate) enum RustChannel {
+    Dev,
+    Nightly,
+    Beta,
+    Stable,
+}
+
+#[derive(Debug, Clone, Copy, Eq)]
+#[allow(dead_code)]
+pub(crate) struct RustVersionData {
+    pub(crate) major: u64,
+    pub(crate) minor: u64,
+    pub(crate) patch: u64,
+    pub(crate) pre: &'static str,
+    pub(crate) channel: RustChannel,
+}
+
+impl PartialEq for RustVersionData {
+    fn eq(&self, other: &Self) -> bool {
+        self.channel == other.channel && self.major == other.major && self.minor == other.minor
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq)]
+#[allow(dead_code)]
+pub struct VersionData {
+    pub(crate) rust_version: RustVersionData,
+    pub(crate) major: u64,
+    pub(crate) minor: u64,
+    pub(crate) patch: u64,
+}
+
+impl PartialEq for VersionData {
+    fn eq(&self, other: &Self) -> bool {
+        self.rust_version == other.rust_version
+            && self.major == other.major
+            && self.minor == other.minor
+    }
+}
+
 #[cfg(debug_assertions)]
 macro_rules! internal_error {
     ( $str:expr ) => {
