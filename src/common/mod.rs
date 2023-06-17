@@ -1,3 +1,4 @@
+#[cfg(not(feature = "tree_walk"))]
 mod discriminant;
 pub(crate) mod natives;
 pub(crate) mod value;

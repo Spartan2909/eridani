@@ -1,7 +1,5 @@
-#![allow(dead_code)] // remove this when bytecode interpreter is finished
-
 #[cfg(feature = "target_std")]
-const TARGET_STD: u8 = 0x00000001;
+const TARGET_STD: u8 = 0b00000001;
 
 #[cfg(not(feature = "target_std"))]
 const TARGET_STD: u8 = 0;
@@ -15,7 +13,7 @@ const TARGET_WEB: u8 = 0;
 pub const TARGET_FEATURES: u8 = TARGET_STD | TARGET_WEB;
 
 #[cfg(feature = "std")]
-const RUNTIME_STD: u8 = 0x00000001;
+const RUNTIME_STD: u8 = 0b00000001;
 
 #[cfg(not(feature = "std"))]
 const RUNTIME_STD: u8 = 0;
