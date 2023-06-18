@@ -4,7 +4,7 @@ use crate::compiler::{
 };
 
 #[derive(Debug, Clone)]
-pub struct ParseTree {
+pub(crate) struct ParseTree {
     modules: Vec<(Option<Token>, Token)>,
     imports: Vec<ImportTree>,
     functions: Vec<Function>,
@@ -25,7 +25,7 @@ impl ParseTree {
 }
 
 #[derive(Debug, Clone)]
-pub struct Function {
+pub(crate) struct Function {
     name: Token,
     methods: Vec<Method>,
 }
@@ -41,7 +41,7 @@ impl Function {
 }
 
 #[derive(Debug, Clone)]
-pub struct Method {
+pub(crate) struct Method {
     args: Vec<NamedPattern>,
     body: Expr,
 }
@@ -57,7 +57,7 @@ impl Method {
 }
 
 #[derive(Debug, Clone)]
-pub struct NamedPattern {
+pub(crate) struct NamedPattern {
     name: Option<Token>,
     pattern: Pattern,
 }
@@ -77,7 +77,7 @@ impl NamedPattern {
 }
 
 #[derive(Debug, Clone)]
-pub struct OperatorChain {
+pub(crate) struct OperatorChain {
     operator: Token,
     mid: Token,
     next: Option<Box<OperatorChain>>,
@@ -114,7 +114,7 @@ impl OperatorChain {
 }
 
 #[derive(Debug, Clone)]
-pub enum Pattern {
+pub(crate) enum Pattern {
     Binary {
         left: Box<Pattern>,
         operator: Token,
@@ -164,7 +164,7 @@ impl Pattern {
 }
 
 #[derive(Debug, Clone)]
-pub enum Expr {
+pub(crate) enum Expr {
     Binary {
         left: Box<Self>,
         operator: Token,
@@ -198,7 +198,7 @@ pub enum Expr {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ImportTree {
+pub(crate) struct ImportTree {
     name: Token,
     next: Option<Box<ImportTree>>,
 }

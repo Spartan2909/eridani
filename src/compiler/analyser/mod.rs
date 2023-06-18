@@ -58,6 +58,7 @@ impl Program {
     }
 
     #[cfg(feature = "no_std")]
+    #[inline(always)]
     fn push_library<T>(&self, _library: T) {}
 }
 
@@ -325,6 +326,7 @@ impl Environment {
         }
     }
 
+    #[must_use]
     pub fn get_or_add(&mut self, name: String) -> u16 {
         if let Some(reference) = self.get(&name) {
             reference

@@ -13,10 +13,13 @@ use core::{
 use core::cell::RefCell;
 
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum Value {
+    #[doc(hidden)]
     Function(Function),
     List(Vec<Value>),
     Nothing,
+    #[doc(hidden)]
     Method(Method),
     Number(f64),
     String(String),

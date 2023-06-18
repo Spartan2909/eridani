@@ -19,6 +19,7 @@ use crate::{
 
 use libloading::{Library, Symbol};
 
+#[inline]
 fn load_error(line: usize) -> Error {
     Error::new(line, "Module", "", "Failed to load module")
 }

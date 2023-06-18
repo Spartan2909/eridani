@@ -129,6 +129,7 @@ macro_rules! internal_error {
 #[cfg(not(debug_assertions))]
 macro_rules! internal_error {
     ( $( $tokens:expr )* ) => {
+    ( $( $tokens:expr ),* ) => {
         panic!("internal compiler error")
     };
 }
