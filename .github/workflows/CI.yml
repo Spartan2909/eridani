@@ -18,7 +18,7 @@ jobs:
       fail-fast: false
       matrix:
         toolchain: [stable, nightly]
-        features-1: ['--features="bin"', '--features="tree_walk"', '']
+        features-1: ['--features="bin" --workspace', '--features="tree_walk"', '']
 
     steps:
     - uses: actions/checkout@v3
