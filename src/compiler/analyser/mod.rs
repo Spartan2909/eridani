@@ -886,7 +886,7 @@ fn analyse_module(
         let mut methods = vec![];
         for method in function.methods() {
             let mut lines = vec![];
-            let mut args: Vec<(Option<String>, Pattern)> = method
+            let mut args: Vec<(Option<&String>, Pattern)> = method
                 .args()
                 .iter()
                 .map(|pattern| {
@@ -1021,7 +1021,7 @@ fn convert_expr(
         }
         ParseExpr::Method(method) => {
             let mut lines = vec![];
-            let mut args: Vec<(Option<String>, Pattern)> = method
+            let mut args: Vec<(Option<&String>, Pattern)> = method
                 .args()
                 .iter()
                 .map(|pattern| {

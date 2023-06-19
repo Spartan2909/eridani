@@ -63,8 +63,8 @@ pub(crate) struct NamedPattern {
 }
 
 impl NamedPattern {
-    pub fn name(&self) -> Option<String> {
-        self.name.as_ref().map(|name| name.lexeme().to_string())
+    pub fn name(&self) -> Option<&String> {
+        self.name.as_ref().map(|name| name.lexeme())
     }
 
     pub fn pattern(&self) -> &Pattern {
