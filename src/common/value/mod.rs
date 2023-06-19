@@ -219,7 +219,7 @@ impl PartialOrd for Value {
 }
 
 impl Value {
-    pub fn number(&self) -> Option<f64> {
+    pub fn as_number(&self) -> Option<f64> {
         if let Value::Number(n) = self {
             Some(*n)
         } else {
@@ -228,15 +228,31 @@ impl Value {
     }
 
     pub(crate) fn expect_number(&self) -> f64 {
-        if let Some(n) = self.number() {
+        if let Some(n) = self.as_number() {
             n
         } else {
-            internal_error!("called 'expect_number' on {}", self)
+            internal_error!("called 'expect_number' on {:?}", self)
         }
     }
 
     pub fn is_something(&self) -> bool {
         !matches!(self, Value::Nothing)
+    }
+
+    pub(crate) fn as_string(&self) -> Option<&String> {
+        if let Value::String(s) = self {
+            Some(s)
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn expect_string(&self) -> &String {
+        if let Some(s) = self.as_string() {
+            s
+        } else {
+            internal_error!("called 'expect_string' on {:?}", self)
+        }
     }
 }
 
