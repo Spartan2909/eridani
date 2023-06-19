@@ -220,8 +220,10 @@ impl Pattern {
             } => {
                 if *operator == LogOp::Or {
                     let left = left.matches(value, variables.clone());
-                    let right = right.matches(value, variables.clone());
-                    if left.is_some() || right.is_some() {
+                    let right = right.matches(value, variables);
+                    if let Some(variables) = left {
+                        Some(variables)
+                    } else if let Some(variables) = right {
                         Some(variables)
                     } else {
                         None
