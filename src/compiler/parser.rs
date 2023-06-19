@@ -4,22 +4,22 @@ use crate::compiler::{
 };
 
 #[derive(Debug, Clone)]
-pub(crate) struct ParseTree {
+pub struct ParseTree {
     modules: Vec<(Option<Token>, Token)>,
     imports: Vec<ImportTree>,
     functions: Vec<Function>,
 }
 
 impl ParseTree {
-    pub fn modules(&self) -> &Vec<(Option<Token>, Token)> {
+    pub(crate) fn modules(&self) -> &Vec<(Option<Token>, Token)> {
         &self.modules
     }
 
-    pub fn imports(&self) -> &Vec<ImportTree> {
+    pub(crate) fn imports(&self) -> &Vec<ImportTree> {
         &self.imports
     }
 
-    pub fn functions(&self) -> &Vec<Function> {
+    pub(crate) fn functions(&self) -> &Vec<Function> {
         &self.functions
     }
 }
@@ -105,10 +105,14 @@ impl OperatorChain {
     }
 
     pub(crate) fn next(&self) -> Option<&OperatorChain> {
+        self.next.as_deref()
+    }
+
+    fn line(&self) -> usize {
         if let Some(next) = &self.next {
-            Some(next)
+            next.line()
         } else {
-            None
+            self.mid.line()
         }
     }
 }
@@ -120,9 +124,9 @@ pub(crate) enum Pattern {
         operator: Token,
         right: Box<Pattern>,
     },
-    Comparision {
-        comparison: Token,
-        rhs: Token,
+    Concatenation {
+        start: Token,
+        operator_chain: OperatorChain,
     },
     List {
         left: Box<Pattern>,
@@ -130,7 +134,7 @@ pub(crate) enum Pattern {
     },
     Literal(Token),
     OperatorComparison {
-        operator_chain: OperatorChain,
+        operator_chain: Option<OperatorChain>,
         comparison: Token,
         rhs: Token,
     },
@@ -151,7 +155,7 @@ impl Pattern {
     fn line(&self) -> usize {
         match self {
             Pattern::Binary { right, .. } => right.line(),
-            Pattern::Comparision { rhs, .. } => rhs.line(),
+            Pattern::Concatenation { operator_chain, .. } => operator_chain.line(),
             Pattern::List { right, .. } => right.line(),
             Pattern::Literal(literal) => literal.line(),
             Pattern::OperatorComparison { rhs, .. } => rhs.line(),
@@ -330,8 +334,8 @@ impl Parser {
         }
     }
 
-    fn consume_any(&mut self, kinds: Vec<TokenType>, message: &'static str) -> Result<Token> {
-        for kind in kinds {
+    fn consume_any(&mut self, kinds: &[TokenType], message: &'static str) -> Result<Token> {
+        for &kind in kinds {
             if self.check_token(kind, 0) {
                 return Ok(self.advance().clone());
             }
@@ -416,7 +420,7 @@ impl Parser {
         let mut imports = vec![name];
         while self.match_token(TokenType::In, true) {
             imports.push(self.consume_any(
-                vec![TokenType::Identifier, TokenType::Super],
+                &[TokenType::Identifier, TokenType::Super],
                 "Expect module name after 'in'",
             )?);
         }
@@ -452,7 +456,7 @@ impl Parser {
         while self.match_token(TokenType::LeftParen, true) {
             methods.push(self.method()?);
             self.consume_any(
-                vec![TokenType::Newline, TokenType::Eof],
+                &[TokenType::Newline, TokenType::Eof],
                 "Expect newline after method",
             )?;
         }
@@ -538,7 +542,7 @@ impl Parser {
             let mut operator_chain = OperatorChain {
                 operator: self.previous().clone(),
                 mid: self.consume_any(
-                    vec![
+                    &[
                         TokenType::Number,
                         TokenType::String,
                         TokenType::Nothing,
@@ -561,7 +565,7 @@ impl Parser {
                 let operator = self.previous().clone();
 
                 let mid = self.consume_any(
-                    vec![
+                    &[
                         TokenType::Number,
                         TokenType::String,
                         TokenType::Nothing,
@@ -572,8 +576,9 @@ impl Parser {
 
                 operator_chain.push(operator, mid);
             }
+
             let comparison = self.consume_any(
-                vec![
+                &[
                     TokenType::BangEqual,
                     TokenType::EqualEqual,
                     TokenType::Greater,
@@ -584,7 +589,7 @@ impl Parser {
                 "Expect comparison",
             )?;
             let rhs = self.consume_any(
-                vec![
+                &[
                     TokenType::Number,
                     TokenType::String,
                     TokenType::Nothing,
@@ -594,7 +599,7 @@ impl Parser {
             )?;
 
             Ok(Pattern::OperatorComparison {
-                operator_chain,
+                operator_chain: Some(operator_chain),
                 comparison,
                 rhs,
             })
@@ -616,7 +621,7 @@ impl Parser {
         ) {
             let comparison = self.previous().clone();
             let rhs = self.consume_any(
-                vec![
+                &[
                     TokenType::Number,
                     TokenType::String,
                     TokenType::Nothing,
@@ -625,7 +630,11 @@ impl Parser {
                 "Expect literal or identifier after comparison",
             )?;
 
-            Ok(Pattern::Comparision { comparison, rhs })
+            Ok(Pattern::OperatorComparison {
+                operator_chain: None,
+                comparison,
+                rhs,
+            })
         } else {
             self.range()
         }
@@ -681,8 +690,47 @@ impl Parser {
             let right = Box::new(self.pattern()?);
             Ok(Pattern::Unary { operator, right })
         } else {
-            self.pattern_primary()
+            self.concatenation()
         }
+    }
+
+    fn concatenation(&mut self) -> Result<Pattern> {
+        match self.peek(1) {
+            Some(next) if next.kind() == TokenType::Plus => {
+                let start = self.consume_any(
+                    &[TokenType::Identifier, TokenType::String],
+                    "Expect string or identifier in concatenation",
+                )?;
+                let operator_chain = self.finish_concatenation()?;
+
+                Ok(Pattern::Concatenation {
+                    start,
+                    operator_chain,
+                })
+            }
+            _ => self.pattern_primary(),
+        }
+    }
+
+    fn finish_concatenation(&mut self) -> Result<OperatorChain> {
+        let operator = self.consume(
+            TokenType::Plus,
+            "Concatenation patterns can only contain addition",
+        )?;
+        let mid = self.consume_any(
+            &[TokenType::Identifier, TokenType::String],
+            "Expect string or identifier in concatenation",
+        )?;
+        let next = if self.check_token(TokenType::Plus, 0) {
+            Some(Box::new(self.finish_concatenation()?))
+        } else {
+            None
+        };
+        Ok(OperatorChain {
+            operator,
+            mid,
+            next,
+        })
     }
 
     fn pattern_primary(&mut self) -> Result<Pattern> {

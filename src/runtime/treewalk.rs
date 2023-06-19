@@ -74,7 +74,7 @@ fn expr(
                 }
                 Value::Method(method) => {
                     let new_variables =
-                        match match_args(method.args(), &arguments, variables.clone()) {
+                        match match_args(method.args(), &arguments, method.arg_order()) {
                             Ok(variables) => variables,
                             Err(_) => {
                                 return Err(Error::new(
@@ -186,7 +186,7 @@ fn function(
         .borrow()
         .methods()
         .iter()
-        .map(|method| match_args(method.borrow().args(), args, vec![]))
+        .map(|method| match_args(method.borrow().args(), args, method.borrow().arg_order()))
         .collect();
 
     let matches = match matches {

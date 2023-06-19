@@ -3,12 +3,13 @@ mod modules;
 mod pattern;
 
 pub(crate) use match_engine::match_args;
+use match_engine::resolve_metapatterns;
 use modules::{get_library, resolve_import, Module, Visibility};
 
 use crate::{
     common::{internal_error, natives, value::Value, EridaniFunction},
     compiler::{
-        analyser::pattern::{LogOp, Pattern, Variable},
+        analyser::pattern::{Item, LogOp, Pattern, Variable},
         parser::{self, ImportTree, ParseTree},
         scanner::{self, TokenType},
         Error, Result,
@@ -240,6 +241,7 @@ impl Function {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Method {
     args: Vec<(Option<u16>, Pattern)>,
+    arg_order: Vec<usize>,
     body: Expr,
     environment: Box<Environment>,
 }
@@ -253,11 +255,15 @@ impl Method {
         &self.body
     }
 
-    pub fn precedence(&self, bindings: &[u16]) -> i32 {
+    pub(crate) fn precedence(&self, bindings: &[u16]) -> i32 {
         self.args
             .iter()
             .map(|(_, pattern)| pattern)
             .fold(0, |a, b| a + b.precedence(bindings))
+    }
+
+    pub(crate) fn arg_order(&self) -> &Vec<usize> {
+        &self.arg_order
     }
 }
 
@@ -738,14 +744,14 @@ fn slices_overlap<T: PartialEq>(s1: &[T], s2: &[T]) -> bool {
     true
 }
 
-fn verify_pattern(pattern: &Pattern, line: usize) -> Result<()> {
-    match pattern.clone() {
+fn verify_pattern(pattern: &Pattern, line: usize, resolved_names: &[u16]) -> Result<()> {
+    match pattern {
         Pattern::Binary {
             left,
             right,
             operator,
         } => {
-            if (left.is_literal(&[]) || right.is_literal(&[])) && operator == LogOp::And {
+            if (left.is_literal(&[]) || right.is_literal(&[])) && *operator == LogOp::And {
                 return Err(Error::new(
                     line,
                     "Pattern",
@@ -753,7 +759,7 @@ fn verify_pattern(pattern: &Pattern, line: usize) -> Result<()> {
                     "Patterns of the form '<literal> & <pattern>' are forbidden",
                 ));
             }
-            if operator == LogOp::Or && !slices_overlap(&left.references(), &right.references()) {
+            if *operator == LogOp::Or && !slices_overlap(&left.references(), &right.references()) {
                 return Err(Error::new(
                     line,
                     "Pattern",
@@ -762,12 +768,36 @@ fn verify_pattern(pattern: &Pattern, line: usize) -> Result<()> {
                 ));
             }
 
-            verify_pattern(&left, line)?;
-            verify_pattern(&right, line)?;
+            verify_pattern(left, line, resolved_names)?;
+            verify_pattern(right, line, resolved_names)?;
+        }
+        Pattern::Concatenation(items) => {
+            let mut wildcard = false;
+
+            for item in items {
+                if let Item::Wildcard(var) = item {
+                    if !resolved_names.contains(&var.reference()) {
+                        if wildcard {
+                            return Err(Error::new(
+                                line,
+                                "Pattern",
+                                "",
+                                "Sequential wildcards in concatenations are not allowed",
+                            ));
+                        } else {
+                            wildcard = true;
+                        }
+                    } else {
+                        wildcard = false;
+                    }
+                } else {
+                    wildcard = false;
+                }
+            }
         }
         Pattern::List { left, right } => {
-            verify_pattern(&left, line)?;
-            verify_pattern(&right, line)?;
+            verify_pattern(left, line, resolved_names)?;
+            verify_pattern(right, line, resolved_names)?;
         }
         Pattern::Range {
             lower,
@@ -885,46 +915,9 @@ fn analyse_module(
 
         let mut methods = vec![];
         for method in function.methods() {
-            let mut lines = vec![];
-            let mut args: Vec<(Option<&String>, Pattern)> = method
-                .args()
-                .iter()
-                .map(|pattern| {
-                    lines.push(pattern.line());
-                    (pattern.name(), pattern.pattern().into())
-                })
-                .collect();
+            let method = analyse_method(method, None, module, modules)?;
 
-            let mut environment = Environment::new_toplevel();
-            let mut references = vec![];
-            for (name, pattern) in &mut args {
-                // this order is important!
-                pattern.bind(&mut environment);
-                if let Some(name) = name {
-                    let reference = environment.get_or_add(name.to_owned());
-                    references.push(Some(reference));
-                } else {
-                    references.push(None);
-                }
-            }
-
-            for (i, (_, pattern)) in args.iter().enumerate() {
-                verify_pattern(pattern, lines[i])?;
-            }
-
-            let args = args
-                .into_iter()
-                .zip(references)
-                .map(|((_, pattern), reference)| (reference, pattern))
-                .collect();
-
-            let body = convert_expr(method.body(), Rc::clone(module), &mut environment, modules)?;
-
-            methods.push(RefCell::new(Method {
-                args,
-                body,
-                environment,
-            }));
+            methods.push(RefCell::new(method));
         }
 
         module
@@ -935,11 +928,88 @@ fn analyse_module(
     Ok(())
 }
 
+#[allow(clippy::borrowed_box)] // This is required for safety
+fn analyse_method(
+    method: &parser::Method,
+    enclosing: Option<&Box<Environment>>,
+    module: &Rc<RefCell<Module>>,
+    modules: &mut Vec<Rc<RefCell<Module>>>,
+) -> Result<Method> {
+    let mut environment = if let Some(enclosing) = enclosing {
+        // SAFETY: `enclosing` is boxed and will never move
+        unsafe { Environment::new(enclosing) }
+    } else {
+        Environment::new_toplevel()
+    };
+
+    let mut lines = vec![];
+    let mut args: Vec<(Option<&String>, Pattern)> = method
+        .args()
+        .iter()
+        .map(|pattern| {
+            lines.push(pattern.line());
+            (pattern.name(), pattern.pattern().into())
+        })
+        .collect();
+
+    let arg_order = if let Ok(order) = resolve_metapatterns(&args) {
+        order
+    } else {
+        return Err(Error::new(
+            lines[0],
+            "Pattern",
+            "",
+            "Circular dependencies in method parameters",
+        ));
+    };
+
+    let mut references = vec![None; args.len()];
+    let mut ordered_references = vec![];
+    for &index in &arg_order {
+        let (name, pattern) = &mut args[index];
+
+        // this order is important!
+        pattern.bind(&mut environment);
+        if let Some(name) = name {
+            let reference = environment.get_or_add(name.to_owned());
+            references[index] = Some(reference);
+            ordered_references.push(Some(reference));
+        } else {
+            ordered_references.push(None);
+        }
+    }
+
+    for &index in &arg_order {
+        let (_, pattern) = &args[index];
+        let resolved_names: Vec<u16> = ordered_references[..=index]
+            .iter()
+            .copied()
+            .flatten()
+            .collect();
+        verify_pattern(pattern, lines[index], &resolved_names)?;
+    }
+
+    let args = args
+        .into_iter()
+        .zip(references)
+        .map(|((_, pattern), reference)| (reference, pattern))
+        .collect();
+
+    let body = convert_expr(method.body(), Rc::clone(module), &mut environment, modules)?;
+
+    Ok(Method {
+        args,
+        arg_order,
+        body,
+        environment,
+    })
+}
+
 fn convert_expr(
     expr: &parser::Expr,
     module: Rc<RefCell<Module>>,
     environment: &mut Box<Environment>,
-    modules: &mut [Rc<RefCell<Module>>],
+    modules: &mut Vec<Rc<RefCell<Module>>>,
 ) -> Result<Expr> {
     use parser::Expr as ParseExpr;
 
@@ -1020,46 +1090,9 @@ fn convert_expr(
             }
         }
         ParseExpr::Method(method) => {
-            let mut lines = vec![];
-            let mut args: Vec<(Option<&String>, Pattern)> = method
-                .args()
-                .iter()
-                .map(|pattern| {
-                    lines.push(pattern.line());
-                    (pattern.name(), pattern.pattern().into())
-                })
-                .collect();
+            let method = analyse_method(method, Some(environment), &module, modules)?;
 
-            // SAFETY: `environment` is boxed and will never move
-            let mut inner_environment = unsafe { Environment::new(environment) };
-            let mut references = vec![];
-            for (name, pattern) in &mut args {
-                // this order is important!
-                pattern.bind(&mut inner_environment);
-                if let Some(name) = name {
-                    let reference = inner_environment.get_or_add(name.clone());
-                    references.push(Some(reference));
-                } else {
-                    references.push(None);
-                }
-            }
-
-            for (i, (_, pattern)) in args.iter().enumerate() {
-                verify_pattern(pattern, lines[i])?;
-            }
-
-            let args = args
-                .into_iter()
-                .zip(references)
-                .map(|((_, pattern), reference)| (reference, pattern))
-                .collect();
-
-            let body = convert_expr(method.body(), module, &mut inner_environment, modules)?;
-            Expr::Method(Box::new(Method {
-                args,
-                body,
-                environment: inner_environment,
-            }))
+            Expr::Method(Box::new(method))
         }
         ParseExpr::Unary { operator, right } => {
             let operator = match operator.kind() {
@@ -1144,7 +1177,7 @@ fn convert_exprs(
     values: &[parser::Expr],
     module: &Rc<RefCell<Module>>,
     environment: &mut Box<Environment>,
-    modules: &mut [Rc<RefCell<Module>>],
+    modules: &mut Vec<Rc<RefCell<Module>>>,
 ) -> Result<Vec<Expr>> {
     let mut result = vec![];
     let mut expr;

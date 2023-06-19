@@ -27,17 +27,19 @@ fn is_superset<T: PartialEq>(superset: &[T], subset: &[T]) -> bool {
     true
 }
 
-fn resolve_metapatterns(
-    patterns: &[(Option<u16>, Pattern)],
-    names: &[u16],
+pub(super) fn resolve_metapatterns(
+    patterns: &[(Option<&String>, Pattern)],
 ) -> Result<Vec<usize>, ()> {
     let mut dependency_indexes = vec![];
     for (_, pattern) in patterns.iter() {
         let mut pattern_dependencies = vec![];
 
-        let references = pattern.references();
-        for reference in references {
-            if let Some(position) = names.iter().position(|x| x == &reference) {
+        let used_names = pattern.names();
+        for used_name in used_names {
+            if let Some(position) = patterns
+                .iter()
+                .position(|(name, _)| name == &Some(used_name))
+            {
                 pattern_dependencies.push(position);
             }
         }
@@ -108,18 +110,16 @@ fn resolve_metapatterns(
 pub(crate) fn match_args(
     patterns: &[(Option<u16>, Pattern)],
     args: &[Value],
-    mut variables: Vec<Value>,
+    order: &[usize],
 ) -> Result<Option<Vec<Value>>, ()> {
     if patterns.len() != args.len() {
         return Ok(None);
     }
 
-    let names: Vec<u16> = patterns.iter().filter_map(|(name, _)| *name).collect();
-
-    let order = resolve_metapatterns(patterns, &names)?;
+    let mut variables = vec![];
 
     let mut args: Vec<_> = args.iter().zip(patterns).collect();
-    for index in order {
+    for &index in order {
         let (value, (name, pattern)) = &mut args[index];
         variables = if let Some(variables) = pattern.matches(value, variables) {
             variables
