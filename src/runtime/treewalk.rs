@@ -5,7 +5,7 @@ use crate::{
 };
 
 use alloc::{collections::VecDeque, rc::Rc};
-use core::{cell::RefCell, cmp::Ordering, result};
+use core::{cell::RefCell, cmp::Ordering};
 
 fn expr(
     expression: Expr,
