@@ -22,6 +22,12 @@ struct Args {
     /// The function to start from (defaults to 'main')
     #[arg(long = "entry-point")]
     entry_point: Option<String>,
+
+    /// An argument to be passed to the `main` function
+    /// Multiple values can specified with this option, and
+    /// they will be passed in the given order
+    #[arg(long = "arg")]
+    args: Vec<String>,
 }
 
 fn main() -> ExitCode {
