@@ -107,30 +107,72 @@ pub(super) fn resolve_metapatterns(
     Ok(result)
 }
 
-pub(crate) fn match_args(
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum MatchResult {
+    Error,
+    Fail,
+    Indeterminable,
+    Success(Vec<Value>),
+}
+
+impl FromIterator<MatchResult> for Option<Vec<Vec<Value>>> {
+    fn from_iter<T: IntoIterator<Item = MatchResult>>(iter: T) -> Self {
+        let mut all_values = vec![];
+
+        for result in iter {
+            match result {
+                MatchResult::Error => return None,
+                MatchResult::Success(values) => all_values.push(values),
+                MatchResult::Fail | MatchResult::Indeterminable => {}
+            }
+        }
+
+        Some(all_values)
+    }
+}
+
+pub(crate) fn partial_match(
     patterns: &[(Option<u16>, Pattern)],
-    args: &[Value],
+    args: &[Option<Value>],
     order: &[usize],
-) -> Result<Option<Vec<Value>>, ()> {
+) -> MatchResult {
     if patterns.len() != args.len() {
-        return Ok(None);
+        return MatchResult::Fail;
     }
 
     let mut variables = vec![];
+    let mut full = true;
 
     let mut args: Vec<_> = args.iter().zip(patterns).collect();
     for &index in order {
         let (value, (name, pattern)) = &mut args[index];
-        variables = if let Some(variables) = pattern.matches(value, variables) {
-            variables
-        } else {
-            return Ok(None);
-        };
+        if let Some(value) = value {
+            variables = if let Some(variables) = pattern.matches(value, variables) {
+                variables
+            } else {
+                return MatchResult::Fail;
+            };
 
-        if name.is_some() {
-            variables.push(value.to_owned());
+            if name.is_some() {
+                variables.push(value.to_owned());
+            }
+        } else {
+            full = false;
         }
     }
 
-    Ok(Some(variables))
+    if full {
+        MatchResult::Success(variables)
+    } else {
+        MatchResult::Indeterminable
+    }
+}
+
+pub(crate) fn match_args(
+    patterns: &[(Option<u16>, Pattern)],
+    args: &[Value],
+    order: &[usize],
+) -> MatchResult {
+    let args: Vec<_> = args.iter().map(|value| Some(value.to_owned())).collect();
+    partial_match(patterns, &args, order)
 }

@@ -1,6 +1,6 @@
 use crate::{
     common::{internal_error, value::Value, EridaniFunction},
-    compiler::analyser::{match_args, BinOp, Expr, Function, ListExpr, Program, UnOp},
+    compiler::analyser::{match_args, BinOp, Expr, Function, ListExpr, MatchResult, Program, UnOp},
     runtime::{EridaniResult, Error, Result},
 };
 
@@ -75,23 +75,23 @@ fn expr(
                 Value::Method(method) => {
                     let new_variables =
                         match match_args(method.args(), &arguments, method.arg_order()) {
-                            Ok(variables) => variables,
-                            Err(_) => {
+                            MatchResult::Success(variables) => variables,
+                            MatchResult::Fail => {
+                                let message =
+                                    format!("Method does not match the arguments {:?}", arguments);
+                                return Err(Error::new("Match", &message, line));
+                            }
+                            MatchResult::Error => {
                                 return Err(Error::new(
                                     "Pattern",
                                     "Circular dependencies in method arguments",
                                     line,
                                 ))
                             }
+                            MatchResult::Indeterminable => {
+                                internal_error!("got `Indeterminable` from `match_args`")
+                            }
                         };
-                    let new_variables = match new_variables {
-                        Some(variables) => variables,
-                        None => {
-                            let message =
-                                format!("Method does not match the arguments {:?}", arguments);
-                            return Err(Error::new("Match", &message, line));
-                        }
-                    };
 
                     Ok((
                         expr(method.body().to_owned(), new_variables, function_name)?.0,
@@ -215,7 +215,7 @@ fn function(
         return native_function(native, function.borrow().name(), args);
     }
 
-    let matches: result::Result<Vec<_>, _> = function
+    let matches: Option<Vec<_>> = function
         .borrow()
         .methods()
         .iter()
@@ -223,8 +223,8 @@ fn function(
         .collect();
 
     let matches = match matches {
-        Ok(value) => value,
-        Err(_) => {
+        Some(value) => value,
+        None => {
             return Err(Error::new(
                 "Pattern",
                 "Circular dependencies in method arguments",
@@ -233,13 +233,7 @@ fn function(
         }
     };
 
-    let mut matches: Vec<_> = matches
-        .iter()
-        .enumerate()
-        .map(|(i, bindings)| (i, bindings.to_owned()))
-        .filter(|(_, bindings)| bindings.is_some())
-        .map(|(i, bindings)| (i, bindings.unwrap()))
-        .collect();
+    let mut matches: Vec<_> = matches.into_iter().enumerate().collect();
 
     if matches.is_empty() {
         let mut args_buf = String::with_capacity(args.len() * 6);

@@ -2,8 +2,8 @@ mod match_engine;
 mod modules;
 mod pattern;
 
-pub(crate) use match_engine::match_args;
 use match_engine::resolve_metapatterns;
+pub(crate) use match_engine::{match_args, MatchResult};
 use modules::{get_library, resolve_import, Module, Visibility};
 
 use crate::{
