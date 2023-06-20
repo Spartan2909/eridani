@@ -11,6 +11,7 @@
 #![forbid(
     unsafe_op_in_unsafe_fn,
     clippy::multiple_unsafe_ops_per_block,
+    clippy::todo,
     clippy::undocumented_unsafe_blocks
 )]
 
