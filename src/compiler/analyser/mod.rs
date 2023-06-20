@@ -295,6 +295,16 @@ pub enum UnOp {
     Negate,
 }
 
+impl fmt::Display for UnOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let string = match self {
+            UnOp::Negate => "!",
+        };
+
+        write!(f, "{string}")
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Environment {
     variables: BiMap<String, u16>,
@@ -366,6 +376,22 @@ impl fmt::Debug for PlaceHolderModule {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ListExpr {
+    expr: Expr,
+    spread: bool,
+}
+
+impl ListExpr {
+    pub(crate) fn expr(self) -> Expr {
+        self.expr
+    }
+
+    pub(crate) fn spread(&self) -> bool {
+        self.spread
+    }
+}
+
 #[derive(Clone, PartialEq)]
 pub(crate) enum Expr {
     Binary {
@@ -380,7 +406,7 @@ pub(crate) enum Expr {
     },
     Call {
         callee: Box<Self>,
-        arguments: Vec<Self>,
+        arguments: Vec<ListExpr>,
         line: usize,
     },
     Function {
@@ -393,9 +419,10 @@ pub(crate) enum Expr {
         value: Box<Self>,
     },
     List {
-        expressions: Vec<Self>,
+        expressions: Vec<ListExpr>,
         line: usize,
     },
+    ListItem(Box<ListExpr>),
     Literal {
         value: Value,
         line: usize,
@@ -429,7 +456,7 @@ impl Expr {
             } => {
                 callee.resolve_placeholders()?;
                 for expr in arguments {
-                    expr.resolve_placeholders()?;
+                    expr.expr.resolve_placeholders()?;
                 }
             }
             Self::Function { .. } => {}
@@ -437,9 +464,10 @@ impl Expr {
             Self::Let { value, .. } => value.resolve_placeholders()?,
             Self::List { expressions, .. } => {
                 for expr in expressions {
-                    expr.resolve_placeholders()?;
+                    expr.expr.resolve_placeholders()?;
                 }
             }
+            Self::ListItem(item) => item.expr.resolve_placeholders()?,
             Self::Literal { .. } => {}
             Self::Method(method) => method.body.resolve_placeholders()?,
             Self::PlaceHolder(placeholder, containing_module) => {
@@ -500,7 +528,7 @@ impl Expr {
                 let mut calls = callee.calls();
 
                 for expr in arguments {
-                    calls.append(&mut expr.calls());
+                    calls.append(&mut expr.expr.calls());
                 }
 
                 calls
@@ -508,14 +536,11 @@ impl Expr {
             Self::Function { function, .. } => vec![Rc::clone(function)],
             Self::Grouping(expr) => expr.calls(),
             Self::Let { value, .. } => value.calls(),
-            Self::List { expressions, .. } => {
-                let mut calls = vec![];
-                for expr in expressions {
-                    calls.append(&mut expr.calls());
-                }
-
-                calls
-            }
+            Self::List { expressions, .. } => expressions
+                .iter()
+                .flat_map(|expr| expr.expr.calls())
+                .collect(),
+            Self::ListItem(expr) => expr.expr.calls(),
             Self::Literal { .. } => vec![],
             Self::Method(method) => method.body.calls(),
             Self::PlaceHolder(_, _) => internal_error!("called 'calls' on placeholder"),
@@ -540,11 +565,12 @@ impl Expr {
             Expr::Let { value, .. } => value.line(),
             Expr::List { expressions, line } => {
                 if let Some(expr) = expressions.last() {
-                    expr.line()
+                    expr.expr.line()
                 } else {
                     *line
                 }
             }
+            Expr::ListItem(item) => item.expr.line(),
             Expr::Literal { line, .. } => *line,
             Expr::Method(method) => method.body.line(),
             Expr::PlaceHolder(placeholder, _) => placeholder.line(),
@@ -604,6 +630,7 @@ impl fmt::Debug for Expr {
                 .field("expressions", expressions)
                 .field("line", line)
                 .finish(),
+            Expr::ListItem(item) => f.debug_tuple("Expr::ListItem").field(item).finish(),
             Expr::Literal { value, line } => f
                 .debug_struct("Expr::Literal")
                 .field("value", value)
@@ -1055,7 +1082,7 @@ fn convert_expr(
         } => {
             let callee = convert_expr(callee, Rc::clone(&module), environment, modules)?;
 
-            let arguments = convert_exprs(arguments, &module, environment, modules)?;
+            let arguments = convert_list(arguments, &module, environment, modules)?;
 
             Expr::Call {
                 callee: Box::new(callee),
@@ -1078,7 +1105,7 @@ fn convert_expr(
             }
         }
         ParseExpr::List { expressions, end } => Expr::List {
-            expressions: convert_exprs(expressions, &module, environment, modules)?,
+            expressions: convert_list(expressions, &module, environment, modules)?,
             line: end.line(),
         },
         ParseExpr::Literal(token) => {
@@ -1095,16 +1122,18 @@ fn convert_expr(
             Expr::Method(Box::new(method))
         }
         ParseExpr::Unary { operator, right } => {
-            let operator = match operator.kind() {
-                TokenType::Minus => UnOp::Negate,
-                _ => internal_error!("parsed token {:?} as unary", operator),
-            };
-
             let right = convert_expr(right, module, environment, modules)?;
 
-            Expr::Unary {
-                operator,
-                right: Box::new(right),
+            match operator.kind() {
+                TokenType::DotDot => Expr::ListItem(Box::new(ListExpr {
+                    expr: right,
+                    spread: true,
+                })),
+                TokenType::Minus => Expr::Unary {
+                    operator: UnOp::Negate,
+                    right: Box::new(right),
+                },
+                _ => internal_error!("parsed '{:?}' as unary operator", operator),
             }
         }
         ParseExpr::Variable(var) => {
@@ -1180,9 +1209,31 @@ fn convert_exprs(
     modules: &mut Vec<Rc<RefCell<Module>>>,
 ) -> Result<Vec<Expr>> {
     let mut result = vec![];
-    let mut expr;
     for value in values {
-        expr = convert_expr(value, Rc::clone(module), environment, modules)?;
+        let expr = convert_expr(value, Rc::clone(module), environment, modules)?;
+
+        result.push(expr);
+    }
+    Ok(result)
+}
+
+fn convert_list(
+    values: &[parser::Expr],
+    module: &Rc<RefCell<Module>>,
+    environment: &mut Box<Environment>,
+    modules: &mut Vec<Rc<RefCell<Module>>>,
+) -> Result<Vec<ListExpr>> {
+    let mut result = vec![];
+    for value in values {
+        let expr = convert_expr(value, Rc::clone(module), environment, modules)?;
+        let expr = if let Expr::ListItem(expression) = expr {
+            *expression
+        } else {
+            ListExpr {
+                expr,
+                spread: false,
+            }
+        };
         result.push(expr);
     }
     Ok(result)

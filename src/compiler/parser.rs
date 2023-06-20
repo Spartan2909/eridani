@@ -808,7 +808,7 @@ impl Parser {
     }
 
     fn unary(&mut self) -> Result<Expr> {
-        if self.match_token(TokenType::Minus, true) {
+        if match_token!(self, true, TokenType::DotDot, TokenType::Minus) {
             let operator = self.previous().clone();
             let right = Box::new(self.unary()?);
             Ok(Expr::Unary { operator, right })

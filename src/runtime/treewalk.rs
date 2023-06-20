@@ -1,6 +1,6 @@
 use crate::{
     common::{internal_error, value::Value, EridaniFunction},
-    compiler::analyser::{match_args, BinOp, Expr, Function, Program, UnOp},
+    compiler::analyser::{match_args, BinOp, Expr, Function, ListExpr, Program, UnOp},
     runtime::{EridaniResult, Error, Result},
 };
 
@@ -57,8 +57,8 @@ fn expr(
 
             let mut evaluated_arguments = vec![];
             for argument in arguments {
-                let (value, new_variables) = expr(argument, variables, function_name)?;
-                evaluated_arguments.push(value);
+                let (values, new_variables) = list_expr(argument, variables, function_name, line)?;
+                evaluated_arguments.extend(values);
                 variables = new_variables;
             }
             let arguments = evaluated_arguments;
@@ -120,15 +120,25 @@ fn expr(
         }
         Expr::List { expressions, .. } => {
             let mut new_variables = variables.clone();
-            let expressions: Result<Vec<Value>> = expressions
+            let expressions: Result<Vec<Vec<Value>>> = expressions
                 .into_iter()
                 .map(|expression| {
-                    let (value, vars) = expr(expression, new_variables.clone(), function_name)?;
+                    let (values, vars) =
+                        list_expr(expression, new_variables.clone(), function_name, line)?;
                     new_variables = vars;
-                    Ok(value)
+                    Ok(values)
                 })
                 .collect();
-            Ok((Value::List(expressions?), variables))
+            let expressions = expressions?.into_iter().flatten().collect();
+            Ok((Value::List(expressions), variables))
+        }
+        Expr::ListItem(item) => {
+            if let Expr::Unary { operator, .. } = item.expr() {
+                let message = format!("Invalid use of '{operator}'");
+                Err(Error::new("Syntax", &message, line))
+            } else {
+                internal_error!("")
+            }
         }
         Expr::Literal { value, .. } => Ok((value, variables)),
         Expr::Method(method) => Ok((Value::Method(method), variables)),
@@ -143,10 +153,11 @@ fn expr(
             let (right, variables) = expr(*right, variables, function_name)?;
             match operator {
                 UnOp::Negate => {
-                    if let Some(value) = -right {
+                    if let Some(value) = -&right {
                         Ok((value, variables))
                     } else {
-                        todo!()
+                        let message = format!("Cannot negate '{}'", right);
+                        Err(Error::new("Type", &message, line))
                     }
                 }
             }
@@ -158,6 +169,28 @@ fn expr(
                 internal_error!("unrecognised variable reference '{}'", reference)
             }
         }
+    }
+}
+
+fn list_expr(
+    expression: ListExpr,
+    variables: Vec<Value>,
+    function_name: &str,
+    line: usize,
+) -> Result<(Vec<Value>, Vec<Value>)> {
+    let spread = expression.spread();
+    let (expression, variables) = expr(expression.expr(), variables, function_name)?;
+
+    if spread {
+        let list = if let Value::List(list) = expression {
+            list
+        } else {
+            return Err(Error::new("Type", "Cannot use '..' on a non-list", line));
+        };
+
+        Ok((list, variables))
+    } else {
+        Ok((vec![expression], variables))
     }
 }
 
