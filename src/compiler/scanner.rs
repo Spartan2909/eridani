@@ -345,7 +345,15 @@ impl Scanner {
                 Ok(self.make_token(kind))
             }
             '"' => self.string(),
-            _ => panic!("syntax error - unexpected character '{c}'"),
+            _ => {
+                let location = format!(" at '{c}'");
+                Err(Error::new(
+                    self.line,
+                    "Syntax",
+                    &location,
+                    "Unexpected character",
+                ))
+            }
         }
     }
 }
