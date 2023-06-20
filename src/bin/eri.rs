@@ -4,6 +4,7 @@ use std::{fs, process::ExitCode};
 use std::time::Instant;
 
 use clap::Parser;
+use eridani::ffi::Value;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -42,6 +43,14 @@ fn main() -> ExitCode {
         fs::canonicalize(&args.file_path).expect("Should have been able to read the file");
     let contents = fs::read_to_string(&file_path).expect("Should have been able to read the file");
 
+    let args: Vec<Value> = match args.args.iter().map(|s| s.parse()).collect() {
+        Ok(args) => args,
+        Err(()) => {
+            eprintln!("Invalid args '{:?}'", args.args);
+            return ExitCode::FAILURE;
+        }
+    };
+
     #[cfg(debug_assertions)]
     let start = Instant::now();
 
@@ -57,7 +66,7 @@ fn main() -> ExitCode {
         }
     };
 
-    match eridani::walk_tree(program, &[]) {
+    match eridani::walk_tree(program, &args) {
         Ok(value) => {
             if value.is_something() {
                 println!("{value}")

@@ -7,6 +7,7 @@ use core::{
     cmp::Ordering,
     fmt,
     ops::{Add, Div, Mul, Neg, Rem, Sub},
+    str::FromStr,
 };
 
 #[cfg(feature = "tree_walk")]
@@ -214,6 +215,32 @@ impl PartialOrd for Value {
             (Value::Number(n1), Value::Number(n2)) => n1.partial_cmp(n2),
             (Value::String(s1), Value::String(s2)) => s1.partial_cmp(s2),
             _ => None,
+        }
+    }
+}
+
+impl FromStr for Value {
+    type Err = ();
+
+    fn from_str<'a>(s: &'a str) -> Result<Self, Self::Err> {
+        if let Ok(n) = s.parse() {
+            Ok(Value::Number(n))
+        } else if (s.starts_with('"') && s.ends_with('"')
+            || s.starts_with('\'') && s.ends_with('\''))
+            && s.len() > 1
+        {
+            Ok(Value::String(s[1..s.len() - 1].to_owned()))
+        } else if s == "nothing" {
+            Ok(Value::Nothing)
+        } else if s.starts_with('[') && s.ends_with(']') && s.len() > 1 {
+            let s = &s[1..s.len() - 1];
+            let mut values = vec![];
+            for value in s.split(',') {
+                values.push(value.parse()?);
+            }
+            Ok(Value::List(values))
+        } else {
+            Err(())
         }
     }
 }
