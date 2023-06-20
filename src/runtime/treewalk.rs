@@ -233,7 +233,12 @@ fn function(
         }
     };
 
-    let mut matches: Vec<_> = matches.into_iter().enumerate().collect();
+    let mut matches: Vec<_> = matches
+        .into_iter()
+        .enumerate()
+        .filter(|(_, values)| values.is_some())
+        .map(|(index, values)| (index, values.unwrap()))
+        .collect();
 
     if matches.is_empty() {
         let mut args_buf = String::with_capacity(args.len() * 6);

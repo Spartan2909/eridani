@@ -115,15 +115,15 @@ pub(crate) enum MatchResult {
     Success(Vec<Value>),
 }
 
-impl FromIterator<MatchResult> for Option<Vec<Vec<Value>>> {
+impl FromIterator<MatchResult> for Option<Vec<Option<Vec<Value>>>> {
     fn from_iter<T: IntoIterator<Item = MatchResult>>(iter: T) -> Self {
         let mut all_values = vec![];
 
         for result in iter {
             match result {
                 MatchResult::Error => return None,
-                MatchResult::Success(values) => all_values.push(values),
-                MatchResult::Fail | MatchResult::Indeterminable => {}
+                MatchResult::Success(values) => all_values.push(Some(values)),
+                MatchResult::Fail | MatchResult::Indeterminable => all_values.push(None),
             }
         }
 
@@ -143,9 +143,9 @@ pub(crate) fn partial_match(
     let mut variables = vec![];
     let mut full = true;
 
-    let mut args: Vec<_> = args.iter().zip(patterns).collect();
+    let args: Vec<_> = args.iter().zip(patterns).collect();
     for &index in order {
-        let (value, (name, pattern)) = &mut args[index];
+        let (value, (name, pattern)) = &args[index];
         if let Some(value) = value {
             variables = if let Some(variables) = pattern.matches(value, variables) {
                 variables
