@@ -1,7 +1,6 @@
 #![cfg_attr(not(feature = "std"), no_std, feature(error_in_core))]
 #![warn(
     clippy::cast_lossless,
-    clippy::dbg_macro,
     clippy::semicolon_if_nothing_returned,
     clippy::semicolon_outside_block,
     clippy::significant_drop_tightening,
@@ -10,6 +9,7 @@
 )]
 #![forbid(
     unsafe_op_in_unsafe_fn,
+    clippy::dbg_macro,
     clippy::multiple_unsafe_ops_per_block,
     clippy::todo,
     clippy::undocumented_unsafe_blocks
