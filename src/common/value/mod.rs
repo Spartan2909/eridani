@@ -266,7 +266,7 @@ impl Value {
         !matches!(self, Value::Nothing)
     }
 
-    pub(crate) fn as_string(&self) -> Option<&String> {
+    pub fn as_string(&self) -> Option<&String> {
         if let Value::String(s) = self {
             Some(s)
         } else {
