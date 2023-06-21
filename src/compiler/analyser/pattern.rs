@@ -13,6 +13,7 @@ use strum::EnumCount;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Type {
+    Callable,
     Integer,
     List,
     Number,
@@ -622,6 +623,7 @@ impl From<Token> for Item {
 impl From<&Token> for Type {
     fn from(value: &Token) -> Self {
         match value.lexeme().as_str() {
+            "Callable" => Type::Callable,
             "Integer" => Type::Integer,
             "List" => Type::List,
             "Number" => Type::Number,

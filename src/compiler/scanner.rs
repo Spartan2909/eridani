@@ -197,6 +197,7 @@ impl Scanner {
     fn identifier_type(&self) -> TokenType {
         match self.nth_char(self.start) {
             'a' => self.check_keyword(1, "nd", TokenType::And),
+            'c' => self.check_keyword(1, "allable", TokenType::Type),
             'd' => self.check_keyword(1, "o", TokenType::Do),
             'e' => self.check_keyword(1, "nd", TokenType::End),
             'i' => match self.nth_char(self.start + 1) {
