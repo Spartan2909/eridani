@@ -1,3 +1,5 @@
+use core::cmp::max;
+
 use crate::{
     common::{internal_error, value::Value},
     compiler::{
@@ -569,9 +571,10 @@ impl Pattern {
                 }
             }
             Pattern::Concatenation { .. } => PatternPrecedence::Concatenation.into(),
-            Pattern::List { left, right } => {
-                (left.precedence(bindings) + right.precedence(bindings)) / 2
-            }
+            Pattern::List { left, right } => max(
+                (left.precedence(bindings) + right.precedence(bindings)) / 2,
+                PatternPrecedence::Type.into(),
+            ),
             Pattern::Literal(_) => PatternPrecedence::Literal.into(),
             Pattern::OperatorComparison { .. } => PatternPrecedence::Comparision.into(),
             Pattern::Range { .. } => PatternPrecedence::Range.into(),
