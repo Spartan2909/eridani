@@ -24,7 +24,7 @@ std = ["dep:libloading"]
 target_std = ["runtime"]
 ffi = []
 tree_walk = ["compiler", "runtime", "std", "target_std"]
-bin = ["dep:clap", "tree_walk"]   # REMOVE DEPENDENCY ON TREE_WALK ONCE BYTECODE VM IS FINISHED
+bin = ["dep:clap", "tree_walk", "ffi"]
 
 [lib]
 crate_type = ["cdylib", "rlib"]
