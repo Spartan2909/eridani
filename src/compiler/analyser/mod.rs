@@ -778,20 +778,21 @@ fn verify_pattern(pattern: &Pattern, line: usize, resolved_names: &[u16]) -> Res
             right,
             operator,
         } => {
-            if (left.is_literal(&[]) || right.is_literal(&[])) && *operator == LogOp::And {
+            if *operator == LogOp::And && (left.is_literal(&[]) || right.is_literal(&[])) {
                 return Err(Error::new(
                     line,
                     "Pattern",
                     "",
                     "Patterns of the form '<literal> & <pattern>' are forbidden",
                 ));
-            }
-            if *operator == LogOp::Or && !slices_overlap(&left.references(), &right.references()) {
+            } else if *operator == LogOp::Or
+                && (!left.references().is_empty() || !right.references().is_empty())
+            {
                 return Err(Error::new(
                     line,
                     "Pattern",
                     "",
-                    "Both sides of a '|' pattern must have the same bindings",
+                    "'|' patterns cannot assign to variables",
                 ));
             }
 
@@ -996,7 +997,7 @@ fn analyse_method(
         let (name, pattern) = &mut args[index];
 
         // this order is important!
-        pattern.bind(&mut environment, lines[index])?;
+        pattern.bind(&mut environment);
         if let Some(name) = name {
             let reference = environment.get_or_add(name.to_owned());
             references[index] = Some(reference);
@@ -1096,9 +1097,8 @@ fn convert_expr(
         }
         ParseExpr::Let { pattern, value } => {
             let value = convert_expr(value, module, environment, modules)?;
-            let line = pattern.line();
             let mut pattern: Pattern = pattern.into();
-            pattern.bind(environment, line)?;
+            pattern.bind(environment);
 
             Expr::Let {
                 pattern,
