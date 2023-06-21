@@ -222,7 +222,7 @@ impl PartialOrd for Value {
 impl FromStr for Value {
     type Err = ();
 
-    fn from_str<'a>(s: &'a str) -> Result<Self, Self::Err> {
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         if let Ok(n) = s.parse() {
             Ok(Value::Number(n))
         } else if (s.starts_with('"') && s.ends_with('"')
