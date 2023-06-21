@@ -6,6 +6,7 @@ use crate::{
         analyser::Environment,
         parser,
         scanner::{Token, TokenType},
+        Error, Result,
     },
 };
 
@@ -410,11 +411,23 @@ impl Pattern {
         }
     }
 
-    pub fn bind(&mut self, environment: &mut Environment) {
+    pub fn bind(&mut self, environment: &mut Environment, line: usize) -> Result<()> {
         match self {
-            Pattern::Binary { left, right, .. } => {
-                left.bind(environment);
-                right.bind(environment);
+            Pattern::Binary {
+                left,
+                operator,
+                right,
+            } => {
+                if *operator == LogOp::Or {
+                    return Err(Error::new(
+                        line,
+                        "Pattern",
+                        "",
+                        "'|' patterns cannot contain variables",
+                    ));
+                }
+                left.bind(environment, line)?;
+                right.bind(environment, line)
             }
             Pattern::Concatenation(items) => {
                 for item in items {
@@ -423,12 +436,14 @@ impl Pattern {
                         *item = Item::Wildcard(Variable::Reference(reference));
                     }
                 }
+
+                Ok(())
             }
             Pattern::List { left, right } => {
-                left.bind(environment);
-                right.bind(environment);
+                left.bind(environment, line)?;
+                right.bind(environment, line)
             }
-            Pattern::Literal(_) => {}
+            Pattern::Literal(_) => Ok(()),
             Pattern::OperatorComparison {
                 operator_chain,
                 rhs,
@@ -442,15 +457,19 @@ impl Pattern {
                     let reference = environment.get_or_add(name.to_owned());
                     *rhs = Item::Wildcard(Variable::Reference(reference));
                 }
+
+                Ok(())
             }
-            Pattern::Range { .. } => {}
-            Pattern::Type(_) => {}
-            Pattern::Unary { right, .. } => right.bind(environment),
+            Pattern::Range { .. } => Ok(()),
+            Pattern::Type(_) => Ok(()),
+            Pattern::Unary { right, .. } => right.bind(environment, line),
             Pattern::Wildcard(binding) => {
                 if let Some(Variable::Name(name)) = binding {
                     let reference = environment.get_or_add(name.to_owned());
                     *self = Pattern::Wildcard(Some(Variable::Reference(reference)));
                 }
+
+                Ok(())
             }
         }
     }

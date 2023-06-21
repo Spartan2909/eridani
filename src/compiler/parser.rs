@@ -152,7 +152,7 @@ pub(crate) enum Pattern {
 }
 
 impl Pattern {
-    fn line(&self) -> usize {
+    pub(super) fn line(&self) -> usize {
         match self {
             Pattern::Binary { right, .. } => right.line(),
             Pattern::Concatenation { operator_chain, .. } => operator_chain.line(),

@@ -996,7 +996,7 @@ fn analyse_method(
         let (name, pattern) = &mut args[index];
 
         // this order is important!
-        pattern.bind(&mut environment);
+        pattern.bind(&mut environment, lines[index])?;
         if let Some(name) = name {
             let reference = environment.get_or_add(name.to_owned());
             references[index] = Some(reference);
@@ -1096,8 +1096,9 @@ fn convert_expr(
         }
         ParseExpr::Let { pattern, value } => {
             let value = convert_expr(value, module, environment, modules)?;
+            let line = pattern.line();
             let mut pattern: Pattern = pattern.into();
-            pattern.bind(environment);
+            pattern.bind(environment, line)?;
 
             Expr::Let {
                 pattern,
