@@ -119,9 +119,9 @@ struct Scanner {
 }
 
 impl Scanner {
-    fn new(source: &str) -> Self {
+    fn new(source: String) -> Self {
         Scanner {
-            source: source.to_string(),
+            source: source,
             start: 0,
             current: 0,
             line: 1,
@@ -359,7 +359,7 @@ impl Scanner {
     }
 }
 
-pub fn scan(source: &str) -> Result<Vec<Token>> {
+pub fn scan(source: String) -> Result<Vec<Token>> {
     let mut scanner = Scanner::new(source);
     let mut tokens = vec![];
     let mut err = vec![];

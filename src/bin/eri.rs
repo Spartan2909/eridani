@@ -55,7 +55,7 @@ fn main() -> ExitCode {
     let start = Instant::now();
 
     let program = match eridani::parse(
-        &contents,
+        contents,
         Some(file_path.to_string_lossy().into()),
         &entry_point,
     ) {

@@ -63,7 +63,7 @@ pub type Result<T> = result::Result<T, Error>;
 pub(crate) use analyser::Program;
 
 #[cfg(feature = "tree_walk")]
-pub fn parse(source: &str, source_origin: Option<String>, entry_point: &str) -> Result<Program> {
+pub fn parse(source: String, source_origin: Option<String>, entry_point: &str) -> Result<Program> {
     let tokens = scanner::scan(source)?;
     let parse_tree = parser::parse(tokens)?;
     analyser::analyse(parse_tree, source_origin, entry_point)

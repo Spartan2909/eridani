@@ -283,7 +283,7 @@ impl Module {
             match module_file {
                 ModuleFile::Foreign(path) => load_foreign_module(path, name, this, line),
                 ModuleFile::Source(source, path) => {
-                    let submodule_parse_tree = parser::parse(scanner::scan(&source)?)?;
+                    let submodule_parse_tree = parser::parse(scanner::scan(source)?)?;
                     let submodule = Rc::new(RefCell::new(Module::new(
                         name,
                         clone_bindings(&this.borrow().bindings),

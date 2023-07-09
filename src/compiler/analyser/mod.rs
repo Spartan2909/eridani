@@ -730,7 +730,7 @@ fn get_std() -> Result<(Vec<Rc<RefCell<Module>>>, BTreeMap<String, Binding>)> {
 
     let mut modules = vec![Rc::clone(&std_module), Rc::clone(&natives_module)];
 
-    let eridani_std = parser::parse(scanner::scan(&eridani_std)?)?;
+    let eridani_std = parser::parse(scanner::scan(eridani_std)?)?;
     analyse_module(eridani_std, &std_module, &mut modules)?;
 
     let prelude = super::eridani_std::PRELUDE;
