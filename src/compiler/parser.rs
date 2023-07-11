@@ -3,6 +3,8 @@ use crate::compiler::{
     Error, Result,
 };
 
+use alloc::collections::VecDeque;
+
 #[derive(Debug, Clone)]
 pub struct ParseTree {
     modules: Vec<(Option<Token>, Token)>,
@@ -285,7 +287,7 @@ impl Parser {
     }
 
     fn is_at_end(&self) -> bool {
-        self.check_ignore_newlines(TokenType::Eof, 0)
+        self.check_token(TokenType::Eof, 0)
     }
 
     fn advance(&mut self) -> &Token {
@@ -369,6 +371,7 @@ impl Parser {
         let mut functions = vec![];
         let mut errors = vec![];
 
+        self.skip_newlines();
         while !self.is_at_end() {
             if let Err(err) = self.parse_item(&mut modules, &mut imports, &mut functions) {
                 errors.push(err);
@@ -385,7 +388,7 @@ impl Parser {
                 functions,
             })
         } else if errors.len() == 1 {
-            Err(errors[0].clone())
+            Err(VecDeque::from(errors).pop_front().unwrap())
         } else {
             Err(Error::Collection(errors))
         }
@@ -904,7 +907,7 @@ impl Parser {
             Ok(Expr::Grouping(Box::new(expr)))
         } else if self.match_token(TokenType::Do, true) {
             let mut body = vec![];
-            while !self.check_ignore_newlines(TokenType::End, 0) && !self.is_at_end() {
+            while !self.check_ignore_newlines(TokenType::End, 0) {
                 self.skip_newlines();
                 body.push(self.expression()?);
                 self.skip_newlines();
