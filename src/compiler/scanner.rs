@@ -121,7 +121,7 @@ struct Scanner {
 impl Scanner {
     fn new(source: String) -> Self {
         Scanner {
-            source: source,
+            source,
             start: 0,
             current: 0,
             line: 1,
