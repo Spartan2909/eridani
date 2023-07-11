@@ -1,7 +1,10 @@
 use core::cmp::max;
 
 use crate::{
-    common::{internal_error, value::Value},
+    common::{
+        internal_error,
+        value::{Type, Value},
+    },
     compiler::{
         analyser::Environment,
         parser,
@@ -10,15 +13,6 @@ use crate::{
 };
 
 use strum::EnumCount;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Type {
-    Callable,
-    Integer,
-    List,
-    Number,
-    String,
-}
 
 fn is_kind(this: &Value, kind: Type) -> bool {
     match (this, kind) {

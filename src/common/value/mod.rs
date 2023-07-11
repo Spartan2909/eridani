@@ -283,5 +283,25 @@ impl Value {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, EnumCount)]
+pub(crate) enum Type {
+    Callable,
+    Integer,
+    List,
+    Number,
+    String,
+}
+
+impl From<u8> for Type {
+    fn from(value: u8) -> Self {
+        if value as usize >= Type::COUNT {
+            internal_error!("cannot interpret '0b{:08b}' as type", value);
+        } else {
+            // SAFETY: guaranteed by condition
+            unsafe { mem::transmute(value) }
+        }
+    }
+}
+
 #[cfg(feature = "compiler")]
 mod conversions;
