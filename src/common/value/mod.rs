@@ -5,13 +5,15 @@ use alloc::rc::Rc;
 
 use core::{
     cmp::Ordering,
-    fmt,
+    fmt, mem,
     ops::{Add, Div, Mul, Neg, Rem, Sub},
     str::FromStr,
 };
 
 #[cfg(feature = "tree_walk")]
 use core::cell::RefCell;
+
+use strum::EnumCount;
 
 #[derive(Debug, Clone)]
 #[non_exhaustive]
