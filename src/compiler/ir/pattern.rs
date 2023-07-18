@@ -1,28 +1,20 @@
-use core::cmp::max;
-
 use crate::{
     common::{
         internal_error,
         value::{Type, Value},
     },
     compiler::{
-        analyser::Environment,
+        ir::Environment,
         parser,
         scanner::{Token, TokenType},
     },
 };
 
-use strum::EnumCount;
+use core::cmp::max;
 
-fn is_kind(this: &Value, kind: Type) -> bool {
-    match (this, kind) {
-        (Value::Number(num), Type::Integer) => num.fract() == 0.0,
-        (Value::List(_), Type::List) => true,
-        (Value::Number(_), Type::Number) => true,
-        (Value::String(_), Type::String) => true,
-        _ => false,
-    }
-}
+use alloc::collections::VecDeque;
+
+use strum::EnumCount;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Comparision {
@@ -84,16 +76,16 @@ impl Item {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct OperatorChain {
-    operator: ArithOp,
-    rhs: Item,
-    next: Option<Box<OperatorChain>>,
+    pub(crate) operator: ArithOp,
+    pub(crate) rhs: Item,
+    pub(crate) next: Option<Box<OperatorChain>>,
 }
 
 impl OperatorChain {
     fn bind(&mut self, environment: &mut Environment) {
         if let Item::Wildcard(Variable::Name(name)) = &self.rhs {
-            let reference = environment.get_or_add(name.to_owned());
-            self.rhs = Item::Wildcard(Variable::Reference(reference));
+            let (reference, pre_set) = environment.get_or_add(name.to_owned());
+            self.rhs = Item::Wildcard(Variable::Reference { reference, pre_set });
         }
 
         if let Some(next) = &mut self.next {
@@ -102,7 +94,7 @@ impl OperatorChain {
     }
 
     fn references(&self, references: &mut Vec<u16>) {
-        if let Item::Wildcard(Variable::Reference(reference)) = &self.rhs {
+        if let Item::Wildcard(Variable::Reference { reference, .. }) = &self.rhs {
             references.push(*reference);
         }
 
@@ -154,15 +146,23 @@ impl From<parser::OperatorChain> for OperatorChain {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Variable {
     Name(String),
-    Reference(u16),
+    Reference { reference: u16, pre_set: bool },
 }
 
 impl Variable {
-    pub(super) fn reference(&self) -> u16 {
-        if let Variable::Reference(reference) = self {
+    pub(crate) fn reference(&self) -> u16 {
+        if let Variable::Reference { reference, .. } = self {
             *reference
         } else {
             internal_error!("called 'reference' on a named variable");
+        }
+    }
+
+    pub fn pre_set(&self) -> bool {
+        if let Variable::Reference { pre_set, .. } = self {
+            *pre_set
+        } else {
+            internal_error!("called 'pre_set' on a named variable");
         }
     }
 }
@@ -299,9 +299,9 @@ impl Pattern {
             }
             Pattern::List { left, right } => {
                 if let Value::List(list) = value {
-                    let variables = left.matches(value, variables)?;
+                    let variables = left.matches(&list[0], variables)?;
                     let tail = match list.get(1) {
-                        Some(_) => Value::List(list[1..].to_vec()),
+                        Some(_) => Value::List(VecDeque::from(list.as_slices().0.to_vec())),
                         None => Value::Nothing,
                     };
                     let variables = right.matches(&tail, variables)?;
@@ -373,7 +373,7 @@ impl Pattern {
                 }
             }
             Pattern::Type(kind) => {
-                if is_kind(value, *kind) {
+                if kind.is_kind(value) {
                     Some(variables)
                 } else {
                     None
@@ -405,7 +405,7 @@ impl Pattern {
         }
     }
 
-    pub fn bind(&mut self, environment: &mut Environment) {
+    pub(super) fn bind(&mut self, environment: &mut Environment) {
         match self {
             Pattern::Binary { left, right, .. } => {
                 left.bind(environment);
@@ -414,8 +414,8 @@ impl Pattern {
             Pattern::Concatenation(items) => {
                 for item in items {
                     if let Item::Wildcard(Variable::Name(name)) = item {
-                        let reference = environment.get_or_add(name.to_owned());
-                        *item = Item::Wildcard(Variable::Reference(reference));
+                        let (reference, pre_set) = environment.get_or_add(name.to_owned());
+                        *item = Item::Wildcard(Variable::Reference { reference, pre_set });
                     }
                 }
             }
@@ -434,8 +434,8 @@ impl Pattern {
                 }
 
                 if let Item::Wildcard(Variable::Name(name)) = rhs {
-                    let reference = environment.get_or_add(name.to_owned());
-                    *rhs = Item::Wildcard(Variable::Reference(reference));
+                    let (reference, pre_set) = environment.get_or_add(name.to_owned());
+                    *rhs = Item::Wildcard(Variable::Reference { reference, pre_set });
                 }
             }
             Pattern::Range { .. } => {}
@@ -443,8 +443,8 @@ impl Pattern {
             Pattern::Unary { right, .. } => right.bind(environment),
             Pattern::Wildcard(binding) => {
                 if let Some(Variable::Name(name)) = binding {
-                    let reference = environment.get_or_add(name.to_owned());
-                    *self = Pattern::Wildcard(Some(Variable::Reference(reference)));
+                    let (reference, pre_set) = environment.get_or_add(name.to_owned());
+                    *self = Pattern::Wildcard(Some(Variable::Reference { reference, pre_set }));
                 }
             }
         }
@@ -546,15 +546,15 @@ impl Pattern {
         }
     }
 
-    pub fn precedence(&self, bindings: &[u16]) -> i32 {
+    pub fn precedence(&self) -> i32 {
         match self {
             Pattern::Binary {
                 left,
                 operator,
                 right,
             } => {
-                let left = left.precedence(bindings);
-                let right = right.precedence(bindings);
+                let left = left.precedence();
+                let right = right.precedence();
                 if *operator == LogOp::And {
                     let highest = if left > right { left } else { right };
 
@@ -567,19 +567,17 @@ impl Pattern {
             }
             Pattern::Concatenation { .. } => PatternPrecedence::Concatenation.into(),
             Pattern::List { left, right } => max(
-                (left.precedence(bindings) + right.precedence(bindings)) / 2,
+                (left.precedence() + right.precedence()) / 2,
                 PatternPrecedence::Type.into(),
             ),
             Pattern::Literal(_) => PatternPrecedence::Literal.into(),
             Pattern::OperatorComparison { .. } => PatternPrecedence::Comparision.into(),
             Pattern::Range { .. } => PatternPrecedence::Range.into(),
             Pattern::Type(_) => PatternPrecedence::Type.into(),
-            Pattern::Unary { right, .. } => {
-                PatternPrecedence::COUNT as i32 - right.precedence(bindings)
-            }
+            Pattern::Unary { right, .. } => PatternPrecedence::COUNT as i32 - right.precedence(),
             Pattern::Wildcard(var) => {
                 if let Some(var) = var {
-                    if bindings.contains(&var.reference()) {
+                    if var.pre_set() {
                         return PatternPrecedence::Literal.into();
                     }
                 }
@@ -609,25 +607,6 @@ impl From<&Token> for Item {
 }
 
 impl From<Token> for Item {
-    fn from(value: Token) -> Self {
-        (&value).into()
-    }
-}
-
-impl From<&Token> for Type {
-    fn from(value: &Token) -> Self {
-        match value.lexeme().as_str() {
-            "Callable" => Type::Callable,
-            "Integer" => Type::Integer,
-            "List" => Type::List,
-            "Number" => Type::Number,
-            "String" => Type::String,
-            _ => internal_error!("parsed '{:?}' as type", value),
-        }
-    }
-}
-
-impl From<Token> for Type {
     fn from(value: Token) -> Self {
         (&value).into()
     }

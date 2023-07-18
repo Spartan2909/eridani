@@ -8,7 +8,16 @@ even is
 
     (n) 0
 
+split is
+    (front + separator + back, separator: String) [front, ..split(back, separator)]
+
+    (s: String, separator: String) [s]
+
 main is
     () do
-        print(greater in std(3, 2))
+        let name = "Bob"
+        let hello = lambda (name: String) print(name)
+        hello(name)
+        print(fibonacci in fib(5))
+        print(split("hello again world", " "))
     end

@@ -1,11 +1,8 @@
 use crate::common::internal_error;
 
-#[cfg(feature = "tree_walk")]
-use alloc::rc::Rc;
-
 use core::{
     cmp::Ordering,
-    fmt, mem,
+    fmt, mem, ptr,
     ops::{Add, Div, Mul, Neg, Rem, Sub},
     str::FromStr,
 };
@@ -13,33 +10,49 @@ use core::{
 #[cfg(feature = "tree_walk")]
 use core::cell::RefCell;
 
+use alloc::collections::VecDeque;
+#[cfg(feature = "tree_walk")]
+use alloc::rc::Rc;
+
 use strum::EnumCount;
+
+#[cfg(not(feature = "tree_walk"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FunctionKind {
+    Eridani,
+    Native,
+}
+
+#[cfg(not(feature = "tree_walk"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FunctionRef {
+    pub(crate) reference: u16,
+    pub(crate) kind: FunctionKind,
+}
 
 #[derive(Debug, Clone)]
 #[non_exhaustive]
+#[cfg(not(feature = "tree_walk"))]
 pub enum Value {
-    #[doc(hidden)]
-    Function(Function),
-    List(Vec<Value>),
+    Function(FunctionRef),
+    List(VecDeque<Value>),
     Nothing,
     #[doc(hidden)]
-    Method(Method),
+    Method(Box<crate::common::bytecode::Method>),
     Number(f64),
     String(String),
 }
 
-#[cfg(feature = "tree_walk")]
-type Function = Rc<RefCell<crate::compiler::analyser::Function>>;
-
-#[cfg(not(feature = "tree_walk"))]
-type Function = u16;
-
-#[cfg(feature = "tree_walk")]
-type Method = Box<crate::compiler::analyser::Method>;
-
-#[cfg(not(feature = "tree_walk"))]
 #[derive(Debug, Clone)]
-pub struct Method;
+#[cfg(feature = "tree_walk")]
+pub(crate) enum Value {
+    Function(Rc<RefCell<crate::compiler::ir::Function>>),
+    List(Vec<Value>),
+    Nothing,
+    Method(Rc<RefCell<crate::compiler::ir::Method>>),
+    Number(f64),
+    String(String),
+}
 
 impl From<Option<Value>> for Value {
     fn from(value: Option<Value>) -> Self {
@@ -68,14 +81,6 @@ impl Add for &Value {
     }
 }
 
-impl Add for Value {
-    type Output = Option<Value>;
-
-    fn add(self, rhs: Self) -> Self::Output {
-        &self + &rhs
-    }
-}
-
 impl Sub for &Value {
     type Output = Option<Value>;
 
@@ -84,14 +89,6 @@ impl Sub for &Value {
             (Value::Number(n1), Value::Number(n2)) => Some(Value::Number(n1 - n2)),
             _ => None,
         }
-    }
-}
-
-impl Sub for Value {
-    type Output = Option<Value>;
-
-    fn sub(self, rhs: Self) -> Self::Output {
-        &self - &rhs
     }
 }
 
@@ -106,14 +103,6 @@ impl Mul for &Value {
     }
 }
 
-impl Mul for Value {
-    type Output = Option<Value>;
-
-    fn mul(self, rhs: Self) -> Self::Output {
-        &self * &rhs
-    }
-}
-
 impl Div for &Value {
     type Output = Option<Value>;
 
@@ -125,14 +114,6 @@ impl Div for &Value {
     }
 }
 
-impl Div for Value {
-    type Output = Option<Value>;
-
-    fn div(self, rhs: Self) -> Self::Output {
-        &self / &rhs
-    }
-}
-
 impl Rem for &Value {
     type Output = Option<Value>;
 
@@ -141,14 +122,6 @@ impl Rem for &Value {
             (Value::Number(n1), Value::Number(n2)) => Some(Value::Number(n1 % n2)),
             _ => None,
         }
-    }
-}
-
-impl Rem for Value {
-    type Output = Option<Value>;
-
-    fn rem(self, rhs: Self) -> Self::Output {
-        &self % &rhs
     }
 }
 
@@ -172,18 +145,62 @@ impl Neg for Value {
     }
 }
 
+impl_binop_traits! {
+    (Add, add, +),
+    (Sub, sub, -),
+    (Mul, mul, *),
+    (Div, div, /),
+    (Rem, rem, %),
+}
+
+macro_rules! impl_binop_traits {
+    { $( ($trait_name:ident, $function_name:ident, $operator:tt), )+ } => {
+        $(
+            impl $trait_name for Value {
+                type Output = Option<Value>;
+
+                fn $function_name(self, other: Self) -> Self::Output {
+                    &self $operator &other
+                }
+            }
+
+            impl $trait_name<&Value> for Value {
+                type Output = Option<Value>;
+
+                fn $function_name(self, other: &Value) -> Self::Output {
+                    &self $operator other
+                }
+            }
+
+            impl $trait_name<Value> for &Value {
+                type Output = Option<Value>;
+
+                fn $function_name(self, other: Value) -> Self::Output {
+                    self $operator &other
+                }
+            }
+        )+
+    };
+}
+
+use impl_binop_traits;
+
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             #[cfg(feature = "tree_walk")]
-            Value::Function(fun) => write!(f, "<function {}>", fun.borrow().name()),
+            Value::Function(fun) => write!(f, "<function '{}'>", fun.borrow().name()),
             #[cfg(not(feature = "tree_walk"))]
             Value::Function(_) => write!(f, "<function>"),
             Value::List(l) => {
                 write!(f, "[")?;
-                for value in l {
-                    write!(f, "{value}")?;
-                    if Some(value) != l.last() {
+                for (i, value) in l.iter().enumerate() {
+                    if value.is_string() {
+                        write!(f, "'{value}'")?;
+                    } else {
+                        write!(f, "{value}")?;
+                    }
+                    if i < l.len() - 1 {
                         write!(f, ", ")?;
                     }
                 }
@@ -204,8 +221,26 @@ impl PartialEq for Value {
             (Value::Nothing, Value::Nothing) => true,
             (Value::Number(n1), Value::Number(n2)) => n1 == n2,
             (Value::String(s1), Value::String(s2)) => s1 == s2,
+            (Value::Function(f1), Value::Function(f2)) => f1 == f2,
+            (Value::Method(m1), Value::Method(m2)) => {
+                let ptr1: *const _ = m1;
+                let ptr2: *const _ = m2;
+                ptr1 == ptr2
+            }
             _ => false,
         }
+    }
+}
+
+impl PartialEq<&Value> for Value {
+    fn eq(&self, other: &&Value) -> bool {
+        self == *other
+    }
+}
+
+impl PartialEq<Value> for &Value {
+    fn eq(&self, other: &Value) -> bool {
+        *self == other
     }
 }
 
@@ -216,6 +251,10 @@ impl PartialOrd for Value {
             (Value::Nothing, Value::Nothing) => Some(Ordering::Equal),
             (Value::Number(n1), Value::Number(n2)) => n1.partial_cmp(n2),
             (Value::String(s1), Value::String(s2)) => s1.partial_cmp(s2),
+            (Value::Function(f1), Value::Function(f2)) if f1 == f2 => Some(Ordering::Equal),
+            (Value::Method(m1), Value::Method(m2)) if ptr::eq(m1, m2) => {
+                Some(Ordering::Equal)
+            }
             _ => None,
         }
     }
@@ -234,11 +273,11 @@ impl FromStr for Value {
             Ok(Value::String(s[1..s.len() - 1].to_owned()))
         } else if s == "nothing" {
             Ok(Value::Nothing)
-        } else if s.starts_with('[') && s.ends_with(']') && s.len() > 1 {
+        } else if s.starts_with('[') && s.ends_with(']') {
             let s = &s[1..s.len() - 1];
-            let mut values = vec![];
+            let mut values = VecDeque::with_capacity(s.matches(',').count() + 1);
             for value in s.split(',') {
-                values.push(value.parse()?);
+                values.push_front(value.parse()?);
             }
             Ok(Value::List(values))
         } else {
@@ -283,15 +322,42 @@ impl Value {
             internal_error!("called 'expect_string' on {:?}", self)
         }
     }
+
+    pub(crate) fn into_string(self) -> String {
+        if let Value::String(s) = self {
+            s
+        } else {
+            internal_error!("called 'expect_string' on {:?}", self)
+        }
+    }
+
+    pub fn is_string(&self) -> bool {
+        matches!(self, Value::String(_))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, EnumCount)]
+#[repr(u8)]
 pub(crate) enum Type {
     Callable,
     Integer,
     List,
     Number,
     String,
+}
+
+impl Type {
+    pub(crate) fn is_kind(self, value: &Value) -> bool {
+        match (self, value) {
+            (Type::Integer, Value::Number(num)) => num.fract() == 0.0,
+            (Type::List, Value::List(_)) => true,
+            (Type::Number, Value::Number(_)) => true,
+            (Type::String, Value::String(_)) => true,
+            (Type::Callable, Value::Function(_)) => true,
+            (Type::Callable, Value::Method(_)) => true,
+            _ => false,
+        }
+    }
 }
 
 impl From<u8> for Type {
@@ -302,6 +368,12 @@ impl From<u8> for Type {
             // SAFETY: guaranteed by condition
             unsafe { mem::transmute(value) }
         }
+    }
+}
+
+impl From<Type> for u8 {
+    fn from(value: Type) -> Self {
+        value as u8
     }
 }
 

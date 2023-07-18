@@ -14,6 +14,7 @@
     clippy::todo,
     clippy::undocumented_unsafe_blocks
 )]
+#![cfg_attr(feature = "tree_walk", allow(dead_code))]
 
 #[cfg(not(any(feature = "compiler", feature = "runtime")))]
 compile_error!("Either feature 'compiler' or feature 'runtime' must be enabled");
@@ -21,7 +22,18 @@ compile_error!("Either feature 'compiler' or feature 'runtime' must be enabled")
 #[cfg(all(feature = "tree_walk", any(feature = "web", feature = "target_web")))]
 compile_error!("The treewalk interpreter cannot be used with web features");
 
+#[cfg(all(feature = "runtime", feature = "tree_walk"))]
+compile_error!("The treewalk interpreter cannot be used with the runtime");
+
 extern crate alloc;
+
+mod prelude {
+    pub use alloc::{
+        string::{String, ToString},
+        vec,
+        vec::Vec,
+    };
+}
 
 #[cfg(feature = "ffi")]
 pub mod ffi {
@@ -40,12 +52,8 @@ mod compiler;
 #[cfg(all(feature = "compiler", not(feature = "tree_walk")))]
 pub use compiler::compile;
 
-#[cfg(feature = "tree_walk")]
-pub use compiler::parse;
-
 #[cfg(feature = "runtime")]
 mod runtime;
 
-
-#[cfg(feature = "tree_walk")]
-pub use runtime::treewalk::walk_tree;
+#[cfg(feature = "runtime")]
+pub use runtime::run;

@@ -1,9 +1,29 @@
 use crate::common::{value::Value, ArgumentError};
 
-mod basic {
-    use crate::common::{get, value::Value, ArgumentError};
+fn get(args: &[Value], index: usize) -> Result<Value, ArgumentError> {
+    if let Some(value) = args.get(index) {
+        Ok(value.clone())
+    } else {
+        let description = format!("No item at index '{index}'");
+        Err(ArgumentError::new(&description))
+    }
+}
 
-    pub fn index(args: &[Value]) -> Result<Value, ArgumentError> {
+fn get_string(args: &[Value], index: usize) -> Result<String, ArgumentError> {
+    let value = get(args, index)?;
+    match value {
+        Value::String(s) => Ok(s),
+        _ => {
+            let description = format!("Expected a string, found '{value}'");
+            Err(ArgumentError::new(&description))
+        }
+    }
+}
+
+mod basic {
+    use crate::common::{natives::get, value::Value, ArgumentError};
+
+    pub(crate) fn index(args: &[Value]) -> Result<Value, ArgumentError> {
         let list = get(args, 0)?;
         let list = if let Value::List(list) = list {
             list
@@ -22,7 +42,7 @@ mod basic {
         Ok(list.get(index).into())
     }
 
-    pub fn number(args: &[Value]) -> Result<Value, ArgumentError> {
+    pub(crate) fn number(args: &[Value]) -> Result<Value, ArgumentError> {
         let value = get(args, 0)?;
         match &value {
             Value::Number(_) => Ok(value),
@@ -35,7 +55,7 @@ mod basic {
         }
     }
 
-    pub fn string(args: &[Value]) -> Result<Value, ArgumentError> {
+    pub(crate) fn string(args: &[Value]) -> Result<Value, ArgumentError> {
         let value = get(args, 0)?;
         Ok(Value::String(format!("{value}")))
     }
@@ -43,11 +63,15 @@ mod basic {
 
 #[cfg(feature = "std")]
 mod feature_std {
-    use crate::common::{get, get_string, value::Value, ArgumentError};
+    use crate::common::{
+        natives::{get, get_string},
+        value::Value,
+        ArgumentError,
+    };
 
     use std::io::{self, Write};
 
-    pub fn print(args: &[Value]) -> Result<Value, ArgumentError> {
+    pub(crate) fn print(args: &[Value]) -> Result<Value, ArgumentError> {
         let item = get(args, 0)?;
 
         #[cfg(debug_assertions)]
@@ -57,7 +81,7 @@ mod feature_std {
         Ok(Value::Nothing)
     }
 
-    pub fn input(args: &[Value]) -> Result<Value, ArgumentError> {
+    pub(crate) fn input(args: &[Value]) -> Result<Value, ArgumentError> {
         let prompt = get_string(args, 0)?;
         print!("{prompt}");
 
@@ -98,7 +122,7 @@ mod feature_web {}
 
 type NativeFunction = fn(&[Value]) -> Result<Value, ArgumentError>;
 
-pub const NATIVES: [(&str, NativeFunction); 5] = [
+pub(crate) const NATIVES: [(&str, NativeFunction); 5] = [
     ("print", feature_std::print),
     ("index", basic::index),
     ("number", basic::number),

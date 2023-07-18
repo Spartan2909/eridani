@@ -4,12 +4,12 @@ index_or_nothing is (value: List, index: Integer) index in internals(value, inde
 
 something is (value: != nothing) value
 
-greater is
+max is
     (a: >= b, b: Number) a
 
     (a: Number, b: Number) b
 
-lower is
+min is
     (a: <= b, b: Number) a
 
     (a: Number, b: Number) b

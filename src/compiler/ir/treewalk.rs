@@ -1,7 +1,9 @@
 use crate::{
     common::{internal_error, value::Value, EridaniFunction},
-    compiler::analyser::{match_args, BinOp, Expr, Function, ListExpr, MatchResult, Program, UnOp},
-    runtime::{EridaniResult, Error, Result},
+    compiler::{
+        ir::{match_args, Expr, Function, ListExpr, MatchResult, Program, UnOp},
+        Error, Result,
+    },
 };
 
 use alloc::{collections::VecDeque, rc::Rc};
@@ -22,20 +24,12 @@ fn expr(
             let (left, variables) = expr(*left, variables, function_name)?;
             let (right, variables) = expr(*right, variables, function_name)?;
 
-            let result = match operator {
-                BinOp::Add => &left + &right,
-                BinOp::Sub => &left - &right,
-                BinOp::Mul => &left * &right,
-                BinOp::Div => &left / &right,
-                BinOp::Mod => &left % &right,
-            };
-
-            if let Some(value) = result {
+            if let Some(value) = operator.operate(&left, &right) {
                 Ok((value, variables))
             } else {
                 let message =
                     format!("Operation {operator} not permitted between {left} and {right}");
-                Err(Error::new("Arithmetic", &message, line))
+                Err(Error::new(line, "Arithmetic", "", &message))
             }
         }
         Expr::Block { body, .. } => {
@@ -64,43 +58,45 @@ fn expr(
             let arguments = evaluated_arguments;
 
             match callee {
-                Value::Function(fun) => {
-                    let name = fun.borrow().name().to_owned();
-                    Ok((
-                        function(fun, &arguments, &name, line)
-                            .init_or_add_context(function_name, line)?,
-                        variables,
-                    ))
-                }
+                Value::Function(fun) => Ok((function(fun, &arguments, line)?, variables)),
                 Value::Method(method) => {
-                    let new_variables =
-                        match match_args(method.args(), &arguments, method.arg_order()) {
-                            MatchResult::Success(variables) => variables,
-                            MatchResult::Fail => {
-                                let message =
-                                    format!("Method does not match the arguments {:?}", arguments);
-                                return Err(Error::new("Match", &message, line));
-                            }
-                            MatchResult::Error => {
-                                return Err(Error::new(
-                                    "Pattern",
-                                    "Circular dependencies in method arguments",
-                                    line,
-                                ))
-                            }
-                            MatchResult::Indeterminable => {
-                                internal_error!("got `Indeterminable` from `match_args`")
-                            }
-                        };
+                    let new_variables = match match_args(
+                        method.borrow().args(),
+                        &arguments,
+                        method.borrow().arg_order(),
+                    ) {
+                        MatchResult::Success(variables) => variables,
+                        MatchResult::Fail => {
+                            let message =
+                                format!("Method does not match the arguments {:?}", arguments);
+                            return Err(Error::new(line, "Match", "", &message));
+                        }
+                        MatchResult::Error => {
+                            return Err(Error::new(
+                                line,
+                                "Pattern",
+                                "",
+                                "Circular dependencies in method arguments",
+                            ))
+                        }
+                        MatchResult::Indeterminable => {
+                            internal_error!("got `Indeterminable` from `match_args`")
+                        }
+                    };
 
                     Ok((
-                        expr(method.body().to_owned(), new_variables, function_name)?.0,
+                        expr(
+                            method.borrow().body().to_owned(),
+                            new_variables,
+                            function_name,
+                        )?
+                        .0,
                         variables,
                     ))
                 }
                 _ => {
                     let message = format!("Cannot call value {callee}");
-                    Err(Error::new("Type", &message, line))
+                    Err(Error::new(line, "Type", "", &message))
                 }
             }
         }
@@ -112,7 +108,7 @@ fn expr(
                 Some(variables) => variables,
                 None => {
                     let message = format!("Pattern {:?} does not match {value}", pattern);
-                    return Err(Error::new("Match", &message, line));
+                    return Err(Error::new(line, "Match", "", &message));
                 }
             };
 
@@ -135,9 +131,9 @@ fn expr(
         Expr::ListItem(item) => {
             if let Expr::Unary { operator, .. } = item.expr() {
                 let message = format!("Invalid use of '{operator}'");
-                Err(Error::new("Syntax", &message, line))
+                Err(Error::new(line, "Syntax", "", &message))
             } else {
-                internal_error!("")
+                internal_error!()
             }
         }
         Expr::Literal { value, .. } => Ok((value, variables)),
@@ -157,7 +153,7 @@ fn expr(
                         Ok((value, variables))
                     } else {
                         let message = format!("Cannot negate '{}'", right);
-                        Err(Error::new("Type", &message, line))
+                        Err(Error::new(line, "Type", "", &message))
                     }
                 }
             }
@@ -185,7 +181,12 @@ fn list_expr(
         let list = if let Value::List(list) = expression {
             list
         } else {
-            return Err(Error::new("Type", "Cannot use '..' on a non-list", line));
+            return Err(Error::new(
+                line,
+                "Type",
+                "",
+                "Cannot use '..' on a non-list",
+            ));
         };
 
         Ok((list, variables))
@@ -194,30 +195,22 @@ fn list_expr(
     }
 }
 
-fn native_function(
-    mut function: Box<dyn EridaniFunction>,
-    function_name: &str,
-    args: &[Value],
-) -> Result<Value> {
+fn native_function(mut function: Box<dyn EridaniFunction>, args: &[Value]) -> Result<Value> {
     match function(args) {
         Ok(value) => Ok(value),
-        Err(error) => Err(Error::from_argument_error(error, function_name)),
+        Err(error) => Err(Error::new(usize::MAX, "Argument", "", error.description())),
     }
 }
 
-fn function(
-    function: Rc<RefCell<Function>>,
-    args: &[Value],
-    function_name: &str,
-    line: usize,
-) -> Result<Value> {
+fn function(function: Rc<RefCell<Function>>, args: &[Value], line: usize) -> Result<Value> {
     if let Some(native) = function.borrow().native() {
-        return native_function(native, function.borrow().name(), args);
+        return native_function(native, args);
     }
 
     let matches: Option<Vec<_>> = function
         .borrow()
         .methods()
+        .unwrap()
         .iter()
         .map(|method| match_args(method.borrow().args(), args, method.borrow().arg_order()))
         .collect();
@@ -226,9 +219,10 @@ fn function(
         Some(value) => value,
         None => {
             return Err(Error::new(
-                "Pattern",
-                "Circular dependencies in method arguments",
                 line,
+                "Pattern",
+                "",
+                "Circular dependencies in method arguments",
             ))
         }
     };
@@ -253,11 +247,11 @@ fn function(
             function.borrow().name(),
             args_buf
         );
-        Err(Error::new("Match", &message, line)).extend_trace(function_name, line)
+        Err(Error::new(line, "Match", "", &message))
     } else if matches.len() == 1 {
         let (function_index, bindings) = VecDeque::from(matches).pop_front().unwrap();
         Ok(expr(
-            function.borrow().methods()[function_index]
+            function.borrow().methods().unwrap()[function_index]
                 .borrow()
                 .body()
                 .to_owned(),
@@ -269,13 +263,15 @@ fn function(
         let precedences: Vec<_> = matches
             .iter()
             .map(|(index, bindings)| {
-                function.borrow().methods()[*index].borrow().precedence(
-                    &bindings
-                        .iter()
-                        .enumerate()
-                        .map(|(a, _)| a as u16)
-                        .collect::<Vec<_>>(),
-                )
+                function.borrow().methods().unwrap()[*index]
+                    .borrow()
+                    .precedence(
+                        &bindings
+                            .iter()
+                            .enumerate()
+                            .map(|(a, _)| a as u16)
+                            .collect::<Vec<_>>(),
+                    )
             })
             .collect();
 
@@ -288,14 +284,14 @@ fn function(
                     min_precedence = *precedence;
                     min_index = i;
                 }
-                Ordering::Equal => return Err(Error::new("Match", "Method collision", line)),
+                Ordering::Equal => return Err(Error::new(line, "Match", "", "Method collision")),
                 _ => {}
             }
         }
 
         let (function_index, variables) = matches.remove(min_index);
         Ok(expr(
-            function.borrow().methods()[function_index]
+            function.borrow().methods().unwrap()[function_index]
                 .borrow()
                 .body()
                 .to_owned(),
@@ -306,8 +302,8 @@ fn function(
     }
 }
 
-pub fn walk_tree(program: Program, args: &[Value]) -> Result<Value> {
+pub(super) fn walk_tree(program: &Program, args: &[Value]) -> Result<Value> {
     let entry_point = Rc::clone(program.entry_point());
 
-    function(entry_point, args, "<program>", 0)
+    function(entry_point, args, 0)
 }

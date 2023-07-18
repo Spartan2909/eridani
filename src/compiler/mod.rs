@@ -6,14 +6,19 @@ use core::error;
 #[cfg(feature = "std")]
 use std::error;
 
-pub(crate) mod analyser;
+#[cfg(not(feature = "tree_walk"))]
+mod compiler;
 mod eridani_std;
+pub(crate) mod ir;
 pub(crate) mod parser;
 pub(crate) mod scanner;
 
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum Error {
+    #[doc(hidden)]
     Collection(Vec<Error>),
+    #[doc(hidden)]
     Single {
         line: usize,
         kind: &'static str,
@@ -59,21 +64,17 @@ impl Error {
 
 pub type Result<T> = result::Result<T, Error>;
 
-#[cfg(feature = "tree_walk")]
-pub(crate) use analyser::Program;
-
-#[cfg(feature = "tree_walk")]
-pub fn parse(source: String, source_origin: Option<String>, entry_point: &str) -> Result<Program> {
-    let tokens = scanner::scan(source)?;
-    let parse_tree = parser::parse(tokens)?;
-    analyser::analyse(parse_tree, source_origin, entry_point)
-}
+#[cfg(not(feature = "tree_walk"))]
+use crate::common::bytecode::Program;
 
 #[cfg(not(feature = "tree_walk"))]
-pub fn compile(source: String, source_origin: Option<String>, entry_point: &str) -> Result<()> {
+pub fn compile(
+    source: String,
+    source_origin: Option<String>,
+    entry_point: &str,
+) -> Result<Program> {
     let tokens = scanner::scan(source)?;
     let parse_tree = parser::parse(tokens)?;
-    let _analysed = analyser::analyse(parse_tree, source_origin, entry_point)?;
-
-    Ok(())
+    let analysed = ir::analyse(parse_tree, source_origin, entry_point)?;
+    Ok(compiler::compile(analysed))
 }

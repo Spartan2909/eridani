@@ -27,3 +27,22 @@ impl From<Token> for Value {
         (&value).into()
     }
 }
+
+impl From<&Token> for Type {
+    fn from(value: &Token) -> Self {
+        match value.lexeme().as_str() {
+            "Callable" => Type::Callable,
+            "Integer" => Type::Integer,
+            "List" => Type::List,
+            "Number" => Type::Number,
+            "String" => Type::String,
+            _ => internal_error!("parsed '{:?}' as type", value),
+        }
+    }
+}
+
+impl From<Token> for Type {
+    fn from(value: Token) -> Self {
+        (&value).into()
+    }
+}

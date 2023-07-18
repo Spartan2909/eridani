@@ -9,7 +9,7 @@ rust-version = "1.64"
 bimap = { version = "0.6", default-features = false }
 clap = { version = "4.1", features = ["derive"], optional = true }
 libloading = { version = "0.8", optional = true }
-strum = { version = "0.24", default-features = false, features = ["derive"] }
+strum = { version = "0.25", default-features = false, features = ["derive"] }
 
 [build-dependencies]
 rustc_version = "0.4"
@@ -23,8 +23,9 @@ target_web = ["compiler"]
 std = ["dep:libloading"]
 target_std = ["compiler"]
 ffi = []
-tree_walk = ["compiler", "runtime", "std", "target_std"]
-bin = ["dep:clap", "tree_walk", "ffi"]
+error_trait = []
+tree_walk = ["compiler", "std", "target_std"]
+bin = ["dep:clap", "ffi"]
 
 [lib]
 crate_type = ["cdylib", "rlib"]
@@ -32,3 +33,8 @@ crate_type = ["cdylib", "rlib"]
 [[bin]]
 name = "eri"
 required-features = ["bin"]
+
+[profile.bin-release]
+inherits = "release"
+lto = true
+codegen-units = 1

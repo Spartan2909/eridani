@@ -22,7 +22,7 @@ use std::{
 use crate::{
     common::internal_error,
     compiler::{
-        analyser::{analyse_module, clone_bindings, Binding, Function, Library},
+        ir::{clone_bindings, converter::analyse_module, Binding, Function, Library},
         parser::{self, ImportTree, ParseTree},
         scanner::{self, Token, TokenType},
         Error, Result,

@@ -1,15 +1,16 @@
 use core::{fmt, result};
 
-#[cfg(not(feature = "std"))]
+#[cfg(all(not(feature = "std"), feature = "error_trait"))]
 use core::error;
 
-#[cfg(feature = "std")]
+#[cfg(all(feature = "std", feature = "error_trait"))]
 use std::error;
 
 use crate::common::ArgumentError;
 
-#[cfg(feature = "tree_walk")]
-pub(crate) mod treewalk;
+use crate::common::{bytecode::Program, value::Value};
+
+mod vm;
 
 #[derive(Debug, Clone)]
 pub enum ErrorInner {
@@ -28,18 +29,18 @@ pub struct Error {
 }
 
 impl Error {
-    pub fn from_argument_error(error: ArgumentError, function_name: &str) -> Self {
+    pub fn from_argument_error(error: ArgumentError, function_name: String) -> Self {
         Error {
             inner: ErrorInner::Argument(error),
-            trace: vec![(function_name.to_string(), usize::MAX, 1)],
+            trace: vec![(function_name, usize::MAX, 1)],
         }
     }
 
-    pub fn new(kind: &str, message: &str, line: usize) -> Self {
+    pub fn new(kind: String, message: String, line: usize) -> Self {
         Error {
             inner: ErrorInner::Generic {
-                kind: kind.to_owned(),
-                message: message.to_owned(),
+                kind,
+                message,
                 line: Some(line),
             },
             trace: vec![],
@@ -55,6 +56,26 @@ impl Error {
         }
 
         self.trace.push((function_name.to_owned(), line, 1));
+    }
+
+    fn init_or_add_context(mut self, function_name: &str, line: usize) -> Self {
+        if let ErrorInner::Generic { line, .. } = &mut self.inner {
+            if let Some(actual_line) = *line {
+                *line = None;
+                self.extend_trace(function_name, actual_line);
+                return self;
+            }
+        }
+
+        self.extend_trace(function_name, line);
+
+        self
+    }
+
+    fn pop_trace(mut self) -> Self {
+        self.trace.pop();
+
+        self
     }
 }
 
@@ -77,47 +98,32 @@ impl fmt::Display for Error {
     }
 }
 
+#[cfg(feature = "error_trait")]
 impl error::Error for Error {}
 
 pub type Result<T> = result::Result<T, Error>;
 
-pub trait EridaniResult {
-    fn extend_trace(self, function_name: &str, line: usize) -> Self;
-    fn init_or_add_context(self, function_name: &str, line: usize) -> Self;
-    fn pop_trace(self) -> Self;
+struct ArgsFormatter<'a>(&'a [Value]);
+
+impl fmt::Display for ArgsFormatter<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "(")?;
+        for (i, arg) in self.0.iter().enumerate() {
+            if arg.is_string() {
+                write!(f, "'{arg}'")?;
+            } else {
+                write!(f, "{arg}")?;
+            }
+            if i < self.0.len() - 1 {
+                write!(f, ",")?;
+            }
+        }
+        write!(f, ")")?;
+        Ok(())
+    }
 }
 
-impl<T> EridaniResult for Result<T> {
-    fn extend_trace(self, function_name: &str, line: usize) -> Self {
-        if let Err(mut e) = self {
-            e.extend_trace(function_name, line);
-            Err(e)
-        } else {
-            self
-        }
-    }
-
-    fn init_or_add_context(mut self, function_name: &str, line: usize) -> Self {
-        if let Err(e) = &mut self {
-            if let ErrorInner::Generic { line, .. } = &mut e.inner {
-                if let Some(actual_line) = *line {
-                    *line = None;
-                    e.extend_trace(function_name, actual_line);
-                    return self;
-                }
-            }
-
-            e.extend_trace(function_name, line);
-        }
-
-        self
-    }
-
-    fn pop_trace(mut self) -> Self {
-        if let Err(e) = &mut self {
-            e.trace.pop();
-        }
-
-        self
-    }
+pub fn run(program: Program, args: Vec<Value>) -> Result<Value> {
+    let mut vm = vm::Vm::new(program);
+    vm.run(args)
 }

@@ -12,7 +12,7 @@ use crate::{
     common::{value::Value, ArgumentError, EridaniFunction},
     compiler::{
         self,
-        analyser::{Function, Module},
+        ir::{Function, Module},
         Error,
     },
 };

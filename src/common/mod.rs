@@ -1,4 +1,6 @@
 #[cfg(not(feature = "tree_walk"))]
+pub(crate) mod bytecode;
+#[cfg(not(feature = "tree_walk"))]
 mod discriminant;
 pub(crate) mod natives;
 pub(crate) mod value;
@@ -21,30 +23,19 @@ impl ArgumentError {
     }
 }
 
-pub fn get(args: &[Value], index: usize) -> Result<Value, ArgumentError> {
-    if let Some(value) = args.get(index) {
-        Ok(value.clone())
-    } else {
-        let description = format!("No item at index '{index}'");
-        Err(ArgumentError::new(&description))
-    }
-}
-
-pub fn get_string(args: &[Value], index: usize) -> Result<String, ArgumentError> {
-    let value = get(args, index)?;
-    match value {
-        Value::String(s) => Ok(s),
-        _ => {
-            let description = format!("Expected a string, found '{value}'");
-            Err(ArgumentError::new(&description))
-        }
-    }
-}
-
 /// A function that can be called from eridani code.
 ///
 /// Automatically implemented for Rust functions and `FnMut` closures.
+#[cfg(not(feature = "tree_walk"))]
 pub trait EridaniFunction: FnMut(&[Value]) -> Result<Value, ArgumentError> {
+    /// Returns a `Box` containing a clone of this value.
+    fn clone_box<'a>(&self) -> Box<dyn 'a + EridaniFunction>
+    where
+        Self: 'a;
+}
+
+#[cfg(feature = "tree_walk")]
+pub(crate) trait EridaniFunction: FnMut(&[Value]) -> Result<Value, ArgumentError> {
     /// Returns a `Box` containing a clone of this value.
     fn clone_box<'a>(&self) -> Box<dyn 'a + EridaniFunction>
     where
@@ -129,8 +120,20 @@ macro_rules! internal_error {
 #[cfg(not(debug_assertions))]
 macro_rules! internal_error {
     ( $( $tokens:expr ),* ) => {
-        panic!("internal compiler error")
+        unsafe { ::core::hint::unreachable_unchecked() }
     };
 }
 
+macro_rules! expect_option {
+    ( $value:expr ) => {
+        $value.expect("internal compiler error")
+    };
+
+    ( $value:expr, $( $arg:tt ),+ ) => {
+        $value.unwrap_or_else(|| $crate::common::internal_error!( $( $arg ),+ ))
+    }
+}
+
 pub(crate) use internal_error;
+
+pub(crate) use expect_option;

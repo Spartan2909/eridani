@@ -1,6 +1,6 @@
 use std::{fs, process::ExitCode};
 
-#[cfg(debug_assertions)]
+//#[cfg(debug_assertions)]
 use std::time::Instant;
 
 use clap::Parser;
@@ -24,7 +24,7 @@ struct Args {
     #[arg(long = "entry-point")]
     entry_point: Option<String>,
 
-    /// An argument to be passed to the `main` function
+    /// An argument to be passed to the `main` function.
     /// Multiple values can specified with this option, and
     /// they will be passed in the given order
     #[arg(long = "arg")]
@@ -51,10 +51,10 @@ fn main() -> ExitCode {
         }
     };
 
-    #[cfg(debug_assertions)]
+    //#[cfg(debug_assertions)]
     let start = Instant::now();
 
-    let program = match eridani::parse(
+    let program = match eridani::compile(
         contents,
         Some(file_path.to_string_lossy().into()),
         &entry_point,
@@ -66,7 +66,7 @@ fn main() -> ExitCode {
         }
     };
 
-    match eridani::walk_tree(program, &args) {
+    match eridani::run(program, args) {
         Ok(value) => {
             if value.is_something() {
                 println!("{value}")
@@ -78,7 +78,7 @@ fn main() -> ExitCode {
         }
     }
 
-    #[cfg(debug_assertions)]
+    //#[cfg(debug_assertions)]
     println!("time taken: {}ms", start.elapsed().as_millis());
 
     ExitCode::SUCCESS

@@ -6,28 +6,28 @@ use crate::compiler::{
 use alloc::collections::VecDeque;
 
 #[derive(Debug, Clone)]
-pub struct ParseTree {
+pub(super) struct ParseTree {
     modules: Vec<(Option<Token>, Token)>,
     imports: Vec<ImportTree>,
     functions: Vec<Function>,
 }
 
 impl ParseTree {
-    pub(crate) fn modules(&self) -> &Vec<(Option<Token>, Token)> {
+    pub(super) fn modules(&self) -> &Vec<(Option<Token>, Token)> {
         &self.modules
     }
 
-    pub(crate) fn imports(&self) -> &Vec<ImportTree> {
+    pub(super) fn imports(&self) -> &Vec<ImportTree> {
         &self.imports
     }
 
-    pub(crate) fn functions(&self) -> &Vec<Function> {
+    pub(super) fn functions(&self) -> &Vec<Function> {
         &self.functions
     }
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct Function {
+pub(super) struct Function {
     name: Token,
     methods: Vec<Method>,
 }
@@ -43,7 +43,7 @@ impl Function {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct Method {
+pub(super) struct Method {
     args: Vec<NamedPattern>,
     body: Expr,
 }
@@ -59,7 +59,7 @@ impl Method {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct NamedPattern {
+pub(super) struct NamedPattern {
     name: Option<Token>,
     pattern: Pattern,
 }
@@ -79,7 +79,7 @@ impl NamedPattern {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct OperatorChain {
+pub(super) struct OperatorChain {
     operator: Token,
     mid: Token,
     next: Option<Box<OperatorChain>>,
@@ -120,7 +120,7 @@ impl OperatorChain {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum Pattern {
+pub(super) enum Pattern {
     Binary {
         left: Box<Pattern>,
         operator: Token,
@@ -170,7 +170,7 @@ impl Pattern {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum Expr {
+pub(super) enum Expr {
     Binary {
         left: Box<Self>,
         operator: Token,
@@ -844,6 +844,7 @@ impl Parser {
 
     fn method_expr(&mut self) -> Result<Expr> {
         if self.match_token(TokenType::Lambda, true) {
+            self.consume(TokenType::LeftParen, "Expect '(' before method parameters")?;
             let method = Box::new(self.method()?);
             Ok(Expr::Method(method))
         } else {
@@ -923,6 +924,6 @@ impl Parser {
     }
 }
 
-pub fn parse(tokens: Vec<Token>) -> Result<ParseTree> {
+pub(super) fn parse(tokens: Vec<Token>) -> Result<ParseTree> {
     Parser::new(tokens).parse()
 }

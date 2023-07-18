@@ -1,4 +1,4 @@
-use crate::{common::value::Value, compiler::analyser::pattern::Pattern};
+use crate::{common::value::Value, compiler::ir::pattern::Pattern};
 
 use core::cell::RefCell;
 
@@ -108,11 +108,20 @@ pub(super) fn resolve_metapatterns(
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) enum MatchResult {
+pub(super) enum MatchResult {
     Error,
     Fail,
     Indeterminable,
     Success(Vec<Value>),
+}
+
+impl MatchResult {
+    pub(super) fn is_ok(&self) -> bool {
+        match self {
+            MatchResult::Error | MatchResult::Fail => false,
+            MatchResult::Indeterminable | MatchResult::Success(_) => true,
+        }
+    }
 }
 
 impl FromIterator<MatchResult> for Option<Vec<Option<Vec<Value>>>> {
@@ -131,8 +140,8 @@ impl FromIterator<MatchResult> for Option<Vec<Option<Vec<Value>>>> {
     }
 }
 
-pub(crate) fn partial_match(
-    patterns: &[(Option<u16>, Pattern)],
+pub(super) fn partial_match(
+    patterns: &[(Option<(u16, bool)>, Pattern)],
     args: &[Option<Value>],
     order: &[usize],
 ) -> MatchResult {
@@ -153,7 +162,7 @@ pub(crate) fn partial_match(
                 return MatchResult::Fail;
             };
 
-            if name.is_some() {
+            if name.is_some() && name.unwrap().1 {
                 variables.push(value.to_owned());
             }
         } else {
@@ -168,8 +177,8 @@ pub(crate) fn partial_match(
     }
 }
 
-pub(crate) fn match_args(
-    patterns: &[(Option<u16>, Pattern)],
+pub(super) fn match_args(
+    patterns: &[(Option<(u16, bool)>, Pattern)],
     args: &[Value],
     order: &[usize],
 ) -> MatchResult {
