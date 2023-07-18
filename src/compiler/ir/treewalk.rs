@@ -1,7 +1,7 @@
 use crate::{
     common::{internal_error, value::Value, EridaniFunction},
     compiler::{
-        ir::{match_args, Expr, Function, ListExpr, MatchResult, Program, UnOp},
+        ir::{Expr, Function, ListExpr, match_engine::{MatchResult, match_args}, Program, UnOp},
         Error, Result,
     },
 };
@@ -61,9 +61,9 @@ fn expr(
                 Value::Function(fun) => Ok((function(fun, &arguments, line)?, variables)),
                 Value::Method(method) => {
                     let new_variables = match match_args(
-                        method.borrow().args(),
+                        method.args(),
                         &arguments,
-                        method.borrow().arg_order(),
+                        method.arg_order(),
                     ) {
                         MatchResult::Success(variables) => variables,
                         MatchResult::Fail => {
@@ -86,7 +86,7 @@ fn expr(
 
                     Ok((
                         expr(
-                            method.borrow().body().to_owned(),
+                            method.body().to_owned(),
                             new_variables,
                             function_name,
                         )?
@@ -116,7 +116,7 @@ fn expr(
         }
         Expr::List { expressions, .. } => {
             let mut new_variables = variables.clone();
-            let expressions: Result<Vec<Vec<Value>>> = expressions
+            let expressions: Result<Vec<VecDeque<Value>>> = expressions
                 .into_iter()
                 .map(|expression| {
                     let (values, vars) =
@@ -173,9 +173,9 @@ fn list_expr(
     variables: Vec<Value>,
     function_name: &str,
     line: usize,
-) -> Result<(Vec<Value>, Vec<Value>)> {
+) -> Result<(VecDeque<Value>, Vec<Value>)> {
     let spread = expression.spread();
-    let (expression, variables) = expr(expression.expr(), variables, function_name)?;
+    let (expression, variables) = expr(expression.expr().to_owned(), variables, function_name)?;
 
     if spread {
         let list = if let Value::List(list) = expression {
@@ -191,11 +191,11 @@ fn list_expr(
 
         Ok((list, variables))
     } else {
-        Ok((vec![expression], variables))
+        Ok((VecDeque::from([expression]), variables))
     }
 }
 
-fn native_function(mut function: Box<dyn EridaniFunction>, args: &[Value]) -> Result<Value> {
+fn native_function(function: &mut dyn EridaniFunction, args: &[Value]) -> Result<Value> {
     match function(args) {
         Ok(value) => Ok(value),
         Err(error) => Err(Error::new(usize::MAX, "Argument", "", error.description())),
@@ -203,7 +203,7 @@ fn native_function(mut function: Box<dyn EridaniFunction>, args: &[Value]) -> Re
 }
 
 fn function(function: Rc<RefCell<Function>>, args: &[Value], line: usize) -> Result<Value> {
-    if let Some(native) = function.borrow().native() {
+    if let Some(native) = function.borrow_mut().native() {
         return native_function(native, args);
     }
 
@@ -265,13 +265,7 @@ fn function(function: Rc<RefCell<Function>>, args: &[Value], line: usize) -> Res
             .map(|(index, bindings)| {
                 function.borrow().methods().unwrap()[*index]
                     .borrow()
-                    .precedence(
-                        &bindings
-                            .iter()
-                            .enumerate()
-                            .map(|(a, _)| a as u16)
-                            .collect::<Vec<_>>(),
-                    )
+                    .precedence
             })
             .collect();
 

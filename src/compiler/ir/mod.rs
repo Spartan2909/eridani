@@ -87,7 +87,7 @@ enum FunctionKind {
     Rust,
 }
 
-pub(super) enum Function {
+pub(crate) enum Function {
     Eridani {
         name: String,
         methods: Vec<Rc<RefCell<Method>>>,
@@ -194,7 +194,7 @@ impl Ord for Function {
 }
 
 impl Function {
-    pub(super) fn name(&self) -> &String {
+    pub(crate) fn name(&self) -> &String {
         match self {
             Function::Eridani { name, .. } => name,
             Function::Rust { name, .. } => name,
@@ -254,7 +254,7 @@ impl Function {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(super) struct Method {
+pub(crate) struct Method {
     args: Vec<(Option<(u16, bool)>, Pattern)>,
     arg_order: Vec<usize>,
     body: Expr,

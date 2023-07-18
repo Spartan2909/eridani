@@ -47,9 +47,9 @@ pub enum Value {
 #[cfg(feature = "tree_walk")]
 pub(crate) enum Value {
     Function(Rc<RefCell<crate::compiler::ir::Function>>),
-    List(Vec<Value>),
+    List(VecDeque<Value>),
     Nothing,
-    Method(Rc<RefCell<crate::compiler::ir::Method>>),
+    Method(Box<crate::compiler::ir::Method>),
     Number(f64),
     String(String),
 }
