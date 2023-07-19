@@ -491,6 +491,7 @@ impl Parser {
         }
         self.consume(TokenType::RightParen, "Expect ')' after method parameters")?;
 
+        self.skip_newlines();
         let body = self.expression()?;
 
         Ok(Method { args, body })
