@@ -1,15 +1,21 @@
 mod disassembler;
 pub(crate) use disassembler::{disassemble_chunk, disassemble_instruction};
+#[cfg(feature = "serialise")]
+mod serialise;
 
-use crate::common::{internal_error, value::Value, EridaniFunction};
+use crate::common::{discriminant::TargetFeatures, internal_error, value::Value, EridaniFunction};
 
 use core::mem;
 
 use alloc::collections::BTreeMap;
 
+#[cfg(feature = "serialise")]
+use serde::{Deserialize, Serialize};
+
 use strum::EnumCount;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, EnumCount)]
+#[cfg_attr(feature = "serialise", derive(Serialize, Deserialize))]
 #[repr(u8)]
 pub(crate) enum GenericOpCode {
     Constant,
@@ -44,6 +50,7 @@ impl From<GenericOpCode> for u8 {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, EnumCount)]
+#[cfg_attr(feature = "serialise", derive(Serialize, Deserialize))]
 #[repr(u8)]
 pub(crate) enum ExprOpCode {
     StartList = EXPR_OP_CODE_START,
@@ -72,6 +79,7 @@ impl From<ExprOpCode> for u8 {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, EnumCount)]
+#[cfg_attr(feature = "serialise", derive(Serialize, Deserialize))]
 #[repr(u8)]
 pub(crate) enum PatternOpCode {
     HoistValue = PATTERN_OP_CODE_START,
@@ -121,6 +129,7 @@ const EXPR_OP_CODE_START: u8 = GenericOpCode::COUNT as u8;
 const PATTERN_OP_CODE_START: u8 = GenericOpCode::COUNT as u8 + ExprOpCode::COUNT as u8;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serialise", derive(Serialize, Deserialize))]
 pub(crate) enum OpCode {
     Generic(GenericOpCode),
     Expr(ExprOpCode),
@@ -172,6 +181,7 @@ fn to_bytes(value: u16) -> (Option<u8>, u8) {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serialise", derive(Serialize, Deserialize))]
 pub(crate) struct Chunk {
     code: Vec<u8>,
     constants: Vec<Value>,
@@ -273,9 +283,11 @@ impl Chunk {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serialise", derive(Serialize, Deserialize))]
 pub(crate) struct Parameters(pub Chunk);
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serialise", derive(Serialize, Deserialize))]
 pub struct Method {
     chunk: Chunk,
     parameters: Parameters,
@@ -305,8 +317,10 @@ impl Method {
 }
 
 #[derive(Debug)]
+#[cfg_attr(feature = "serialise", derive(Serialize, Deserialize))]
 pub(crate) struct Function {
     methods: Vec<Method>,
+    #[cfg_attr(feature = "serialise", serde(skip))]
     memo: BTreeMap<Vec<Value>, Value>,
     name: String,
 }
@@ -331,6 +345,7 @@ impl Function {
 
 pub struct Program {
     pub(crate) functions: Vec<Function>,
-    pub(crate) natives: Vec<(Box<dyn EridaniFunction>, String)>,
+    pub(crate) natives: Vec<(EridaniFunction, String)>,
     pub(crate) entry_point: u16,
+    pub(crate) features: TargetFeatures,
 }

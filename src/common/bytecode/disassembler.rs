@@ -67,7 +67,9 @@ pub(crate) fn disassemble_instruction(chunk: &Chunk, offset: usize) -> usize {
             PatternOpCode::PushVar => simple_instruction("PushVar", offset),
             PatternOpCode::StartConcat => simple_instruction("StartConcat", offset),
             PatternOpCode::ConcatCompare => simple_instruction("ConcatCompare", offset),
-            PatternOpCode::ConcatCompareVarWaiting => simple_instruction("ConcatCompareVarWaiting", offset),
+            PatternOpCode::ConcatCompareVarWaiting => {
+                simple_instruction("ConcatCompareVarWaiting", offset)
+            }
             PatternOpCode::EndConcat => simple_instruction("EndConcat", offset),
             PatternOpCode::EndConcatWithVar => simple_instruction("EndConcatWithVar", offset),
             PatternOpCode::JumpIfTrue => wide_byte_instruction("JumpIfTrue", chunk, offset),

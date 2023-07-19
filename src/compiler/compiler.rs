@@ -3,6 +3,7 @@ use crate::{
         bytecode::{
             Chunk, ExprOpCode, Function, GenericOpCode, Method, Parameters, PatternOpCode, Program,
         },
+        discriminant::TARGET_FEATURES,
         expect_option, internal_error,
         value::{FunctionKind, FunctionRef, Value},
         EridaniFunction,
@@ -10,13 +11,13 @@ use crate::{
     compiler::ir::{self, pattern},
 };
 
-use core::{cell::RefCell, fmt, mem};
+use core::{cell::RefCell, fmt};
 
 use alloc::{collections::BTreeMap, rc::Rc};
 
 struct Functions {
     eridani: Vec<Function>,
-    native: Vec<(Box<dyn EridaniFunction>, String)>,
+    native: Vec<(EridaniFunction, String)>,
     references: BTreeMap<Rc<RefCell<ir::Function>>, (FunctionKind, u16)>,
 }
 
@@ -79,9 +80,14 @@ fn compile_pattern(
                     }
                     pattern::Item::Wildcard(variable) => {
                         if variable.pre_set() {
-                            chunk.push_variable_width_instruction(GenericOpCode::GetVar, variable.reference(), line);
+                            chunk.push_variable_width_instruction(
+                                GenericOpCode::GetVar,
+                                variable.reference(),
+                                line,
+                            );
                             if var_waiting {
-                                chunk.push_instruction(PatternOpCode::ConcatCompareVarWaiting, line);
+                                chunk
+                                    .push_instruction(PatternOpCode::ConcatCompareVarWaiting, line);
                             } else {
                                 chunk.push_instruction(PatternOpCode::ConcatCompare, line);
                             }
@@ -96,7 +102,7 @@ fn compile_pattern(
             } else {
                 chunk.push_instruction(PatternOpCode::EndConcat, line);
             }
-        },
+        }
         pattern::Pattern::List { left, right } => {
             chunk.push_instruction(PatternOpCode::SplitList, line);
             compile_pattern(left, line, chunk, jumps);
@@ -365,8 +371,8 @@ pub(super) fn compile(analysed: ir::Program) -> Program {
     let mut num_eridani = 0;
     let mut num_native = 0;
     for function in analysed.functions() {
-        let mut function_ref = function.borrow_mut();
-        match &mut *function_ref {
+        let mut function_ref = function.borrow();
+        match &*function_ref {
             ir::Function::Eridani { .. } => {
                 drop(function_ref);
                 functions
@@ -375,10 +381,7 @@ pub(super) fn compile(analysed: ir::Program) -> Program {
                 num_eridani += 1;
             }
             ir::Function::Rust { name, func } => {
-                functions.native.push((
-                    mem::replace(func, Box::new(|_| Ok(Value::Nothing))),
-                    name.to_owned(),
-                ));
+                functions.native.push((*func, name.to_owned()));
                 drop(function_ref);
                 functions
                     .references
@@ -409,5 +412,6 @@ pub(super) fn compile(analysed: ir::Program) -> Program {
         functions: eridani,
         natives: native,
         entry_point: *entry_point,
+        features: TARGET_FEATURES,
     }
 }

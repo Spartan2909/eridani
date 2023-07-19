@@ -15,11 +15,6 @@ use core::{mem, ptr::NonNull};
 
 use alloc::collections::VecDeque;
 
-struct Debugger {
-    buf: String,
-    dropped_in_panic: bool,
-}
-
 #[derive(Debug)]
 struct CallFrame {
     code: NonNull<Chunk>,
@@ -47,9 +42,19 @@ pub(super) struct Vm {
     stack: Vec<Value>,
     frames: Vec<CallFrame>,
     functions: Vec<Function>,
-    natives: Vec<(Box<dyn EridaniFunction>, String)>,
+    natives: Vec<(EridaniFunction, String)>,
     entry_point: u16,
-    debugger: Debugger,
+    dropped_in_panic: bool,
+}
+
+#[cfg(debug_assertions)]
+#[allow(clippy::dbg_macro)]
+impl Drop for Vm {
+    fn drop(&mut self) {
+        if self.dropped_in_panic {
+            dbg!(&self.stack);
+        }
+    }
 }
 
 impl Vm {
@@ -58,6 +63,7 @@ impl Vm {
             functions,
             natives,
             entry_point,
+            features: _,
         } = program;
         Self {
             stack: Vec::with_capacity(256),
@@ -65,7 +71,7 @@ impl Vm {
             functions,
             natives,
             entry_point,
-            debugger: Debugger { buf: String::with_capacity(1024), dropped_in_panic: true }
+            dropped_in_panic: true,
         }
     }
 
@@ -111,7 +117,10 @@ impl Vm {
     }
 
     fn concatenation_match_start(&self) -> usize {
-        expect_option!(self.current_callframe().concatenation_match_start, "read 'concatenation_match_start' outside of concatenation")
+        expect_option!(
+            self.current_callframe().concatenation_match_start,
+            "read 'concatenation_match_start' outside of concatenation"
+        )
     }
 
     fn pop_frame(&mut self) -> CallFrame {
@@ -272,9 +281,7 @@ impl Vm {
                             vec![],
                         ));
                         let num_args = self.stack.len() - args_start;
-                        if num_args == method.num_parameters()
-                            && self.pattern()?
-                        {
+                        if num_args == method.num_parameters() && self.pattern()? {
                             let frame = self.pop_frame();
                             let variables = frame.variables;
                             self.stack.truncate(args_start);
@@ -295,10 +302,7 @@ impl Vm {
                                 "Match".to_string(),
                                 format!(
                                     "Lambda expression does not match the arguments '{}'",
-                                    ArgsFormatter(
-                                        &self.stack
-                                            [args_start..args_start + num_args]
-                                    )
+                                    ArgsFormatter(&self.stack[args_start..args_start + num_args])
                                 ),
                             ));
                         }
@@ -451,7 +455,8 @@ impl Vm {
                 let base = self.stack_top().expect_string();
                 let match_start = self.concatenation_match_start();
                 if base[match_start..].starts_with(&value) {
-                    self.current_callframe_mut().concatenation_match_start = Some(match_start + value.len());
+                    self.current_callframe_mut().concatenation_match_start =
+                        Some(match_start + value.len());
                 } else {
                     return Some(false);
                 }
@@ -482,7 +487,9 @@ impl Vm {
             PatternOpCode::EndConcatWithVar => {
                 let value = self.pop_stack().into_string();
                 let match_start = self.concatenation_match_start();
-                self.current_callframe_mut().variables.push(Value::String(value[match_start..].to_string()));
+                self.current_callframe_mut()
+                    .variables
+                    .push(Value::String(value[match_start..].to_string()));
                 self.stack.push(Value::Number(1.0));
                 self.current_callframe_mut().concatenation_match_start = None;
             }
@@ -580,7 +587,14 @@ impl Vm {
         let method_index = if let Some(method_index) = method_index {
             method_index
         } else {
-            return Err(self.error("Match".to_string(), format!("Function '{}' has no methods that match the arguments '{}'", self.functions[index as usize].name(), ArgsFormatter(&self.stack[args_start..args_start + num_args]))));
+            return Err(self.error(
+                "Match".to_string(),
+                format!(
+                    "Function '{}' has no methods that match the arguments '{}'",
+                    self.functions[index as usize].name(),
+                    ArgsFormatter(&self.stack[args_start..args_start + num_args])
+                ),
+            ));
         };
         let frame = self.pop_frame();
         let variables = frame.variables;
@@ -612,6 +626,7 @@ impl Vm {
     pub fn run(&mut self, mut args: Vec<Value>) -> Result<Value> {
         self.stack.append(&mut args);
         self.function(self.entry_point, 0)?;
+        self.dropped_in_panic = false;
         Ok(expect_option!(self.stack.pop(), "missing return value"))
     }
 }

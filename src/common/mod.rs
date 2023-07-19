@@ -1,7 +1,7 @@
 #[cfg(not(feature = "tree_walk"))]
 pub(crate) mod bytecode;
 #[cfg(not(feature = "tree_walk"))]
-mod discriminant;
+pub(crate) mod discriminant;
 pub(crate) mod natives;
 pub(crate) mod value;
 use value::Value;
@@ -23,42 +23,11 @@ impl ArgumentError {
     }
 }
 
-/// A function that can be called from eridani code.
-///
-/// Automatically implemented for Rust functions and `FnMut` closures.
 #[cfg(not(feature = "tree_walk"))]
-pub trait EridaniFunction: FnMut(&[Value]) -> Result<Value, ArgumentError> {
-    /// Returns a `Box` containing a clone of this value.
-    fn clone_box<'a>(&self) -> Box<dyn 'a + EridaniFunction>
-    where
-        Self: 'a;
-}
+pub type EridaniFunction = fn(&[Value]) -> Result<Value, ArgumentError>;
 
 #[cfg(feature = "tree_walk")]
-pub(crate) trait EridaniFunction: FnMut(&[Value]) -> Result<Value, ArgumentError> {
-    /// Returns a `Box` containing a clone of this value.
-    fn clone_box<'a>(&self) -> Box<dyn 'a + EridaniFunction>
-    where
-        Self: 'a;
-}
-
-impl<F> EridaniFunction for F
-where
-    F: FnMut(&[Value]) -> Result<Value, ArgumentError> + Clone,
-{
-    fn clone_box<'a>(&self) -> Box<dyn 'a + EridaniFunction>
-    where
-        Self: 'a,
-    {
-        Box::new(self.clone())
-    }
-}
-
-impl<'a> Clone for Box<dyn 'a + EridaniFunction> {
-    fn clone(&self) -> Self {
-        (**self).clone_box()
-    }
-}
+pub(crate) type EridaniFunction = fn(&[Value]) -> Result<Value, ArgumentError>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(dead_code)]

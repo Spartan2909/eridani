@@ -1,7 +1,10 @@
 use crate::{
     common::{internal_error, value::Value, EridaniFunction},
     compiler::{
-        ir::{Expr, Function, ListExpr, match_engine::{MatchResult, match_args}, Program, UnOp},
+        ir::{
+            match_engine::{match_args, MatchResult},
+            Expr, Function, ListExpr, Program, UnOp,
+        },
         Error, Result,
     },
 };
@@ -60,29 +63,21 @@ fn expr(
             match callee {
                 Value::Function(fun) => Ok((function(fun, &arguments, line)?, variables)),
                 Value::Method(method) => {
-                    let new_variables = match match_args(
-                        method.args(),
-                        &arguments,
-                        method.arg_order(),
-                    ) {
-                        MatchResult::Success(variables) => variables,
-                        MatchResult::Fail => {
-                            let message =
-                                format!("Method does not match the arguments {:?}", arguments);
-                            return Err(Error::new(line, "Match", "", &message));
-                        }
-                        MatchResult::Indeterminable => {
-                            internal_error!("got `Indeterminable` from `match_args`")
-                        }
-                    };
+                    let new_variables =
+                        match match_args(method.args(), &arguments, method.arg_order()) {
+                            MatchResult::Success(variables) => variables,
+                            MatchResult::Fail => {
+                                let message =
+                                    format!("Method does not match the arguments {:?}", arguments);
+                                return Err(Error::new(line, "Match", "", &message));
+                            }
+                            MatchResult::Indeterminable => {
+                                internal_error!("got `Indeterminable` from `match_args`")
+                            }
+                        };
 
                     Ok((
-                        expr(
-                            method.body().to_owned(),
-                            new_variables,
-                            function_name,
-                        )?
-                        .0,
+                        expr(method.body().to_owned(), new_variables, function_name)?.0,
                         variables,
                     ))
                 }
@@ -187,7 +182,7 @@ fn list_expr(
     }
 }
 
-fn native_function(function: &mut dyn EridaniFunction, args: &[Value]) -> Result<Value> {
+fn native_function(function: EridaniFunction, args: &[Value]) -> Result<Value> {
     match function(args) {
         Ok(value) => Ok(value),
         Err(error) => Err(Error::new(usize::MAX, "Argument", "", error.description())),
@@ -198,7 +193,6 @@ fn function(function: Rc<RefCell<Function>>, args: &[Value], line: usize) -> Res
     if function.borrow().is_native() {
         return native_function(function.borrow_mut().native().unwrap(), args);
     }
-    
 
     let matches: Vec<_> = function
         .borrow()

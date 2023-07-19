@@ -66,7 +66,7 @@ fn get_std() -> Result<(Vec<Rc<RefCell<Module>>>, BTreeMap<String, Binding>)> {
             .borrow_mut()
             .push_function(Rc::new(RefCell::new(Function::Rust {
                 name: name.to_string(),
-                func: Box::new(func),
+                func,
             })));
     }
 

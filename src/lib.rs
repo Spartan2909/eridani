@@ -7,9 +7,9 @@
     clippy::std_instead_of_core,
     clippy::std_instead_of_core
 )]
+#![deny(clippy::dbg_macro)]
 #![forbid(
     unsafe_op_in_unsafe_fn,
-    clippy::dbg_macro,
     clippy::multiple_unsafe_ops_per_block,
     clippy::todo,
     clippy::undocumented_unsafe_blocks

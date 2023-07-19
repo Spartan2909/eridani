@@ -1,7 +1,7 @@
-#[cfg(feature = "std")]
-mod ffi;
-#[cfg(feature = "std")]
-use ffi::{load_foreign_module, FOREIGN_MODULE_EXTENSION};
+//#[cfg(feature = "std")]
+//mod ffi;
+//#[cfg(feature = "std")]
+//use ffi::{load_foreign_module, FOREIGN_MODULE_EXTENSION};
 
 use core::{
     cell::{RefCell, RefMut},
@@ -37,7 +37,7 @@ pub(super) enum Visibility {
 
 #[cfg(feature = "std")]
 enum ModuleFile {
-    Foreign(PathBuf),
+    //Foreign(PathBuf),
     Source(String, PathBuf),
 }
 
@@ -241,6 +241,7 @@ impl Module {
                 }
             }
 
+            /*
             let paths_to_try = if supermodule_filename == "mod.eri" {
                 [
                     format!("{name}.{FOREIGN_MODULE_EXTENSION}"),
@@ -264,6 +265,7 @@ impl Module {
                     return Some(ModuleFile::Foreign(module_file));
                 }
             }
+            */
         }
 
         None
@@ -281,7 +283,7 @@ impl Module {
         let possible_source = this.borrow().find_submodule_file(name);
         if let Some(module_file) = possible_source {
             match module_file {
-                ModuleFile::Foreign(path) => load_foreign_module(path, name, this, line),
+                //ModuleFile::Foreign(path) => load_foreign_module(path, name, this, line),
                 ModuleFile::Source(source, path) => {
                     let submodule_parse_tree = parser::parse(scanner::scan(source)?)?;
                     let submodule = Rc::new(RefCell::new(Module::new(

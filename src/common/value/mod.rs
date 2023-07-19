@@ -2,8 +2,9 @@ use crate::common::internal_error;
 
 use core::{
     cmp::Ordering,
-    fmt, mem, ptr,
+    fmt, mem,
     ops::{Add, Div, Mul, Neg, Rem, Sub},
+    ptr,
     str::FromStr,
 };
 
@@ -14,10 +15,14 @@ use alloc::collections::VecDeque;
 #[cfg(feature = "tree_walk")]
 use alloc::rc::Rc;
 
+#[cfg(feature = "serialise")]
+use serde::{Deserialize, Serialize};
+
 use strum::EnumCount;
 
 #[cfg(not(feature = "tree_walk"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serialise", derive(Serialize, Deserialize))]
 pub(crate) enum FunctionKind {
     Eridani,
     Native,
@@ -25,12 +30,14 @@ pub(crate) enum FunctionKind {
 
 #[cfg(not(feature = "tree_walk"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serialise", derive(Serialize, Deserialize))]
 pub struct FunctionRef {
     pub(crate) reference: u16,
     pub(crate) kind: FunctionKind,
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serialise", derive(Serialize, Deserialize))]
 #[non_exhaustive]
 #[cfg(not(feature = "tree_walk"))]
 pub enum Value {
@@ -252,9 +259,7 @@ impl PartialOrd for Value {
             (Value::Number(n1), Value::Number(n2)) => n1.partial_cmp(n2),
             (Value::String(s1), Value::String(s2)) => s1.partial_cmp(s2),
             (Value::Function(f1), Value::Function(f2)) if f1 == f2 => Some(Ordering::Equal),
-            (Value::Method(m1), Value::Method(m2)) if ptr::eq(m1, m2) => {
-                Some(Ordering::Equal)
-            }
+            (Value::Method(m1), Value::Method(m2)) if ptr::eq(m1, m2) => Some(Ordering::Equal),
             _ => None,
         }
     }

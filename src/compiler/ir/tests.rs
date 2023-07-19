@@ -1,10 +1,13 @@
 #[cfg(feature = "tree_walk")]
 mod test_with_treewalk {
-    use crate::{compiler::{
-        ir::{analyse_unoptimised, optimise, treewalk::walk_tree},
-        parser::parse,
-        scanner::scan,
-    }, common::value::Value};
+    use crate::{
+        common::value::Value,
+        compiler::{
+            ir::{analyse_unoptimised, optimise, treewalk::walk_tree},
+            parser::parse,
+            scanner::scan,
+        },
+    };
 
     #[test]
     fn fibonacci() {

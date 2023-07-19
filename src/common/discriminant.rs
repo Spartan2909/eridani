@@ -1,7 +1,12 @@
+#[cfg(feature = "serialise")]
+use serde::{Deserialize, Serialize};
+
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "serialise", derive(Serialize, Deserialize))]
 pub struct TargetFeatures(u8);
 
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "serialise", derive(Serialize, Deserialize))]
 pub struct RuntimeFeatures(u8);
 
 #[cfg(feature = "target_std")]
@@ -16,7 +21,7 @@ const TARGET_WEB: u8 = 0b00000010;
 #[cfg(not(feature = "target_web"))]
 const TARGET_WEB: u8 = 0;
 
-pub const TARGET_FEATURES: RuntimeFeatures = RuntimeFeatures(TARGET_STD | TARGET_WEB);
+pub const TARGET_FEATURES: TargetFeatures = TargetFeatures(TARGET_STD | TARGET_WEB);
 
 #[cfg(feature = "std")]
 const RUNTIME_STD: u8 = 0b00000001;

@@ -87,6 +87,7 @@ enum FunctionKind {
     Rust,
 }
 
+#[derive(Debug, Clone)]
 pub(crate) enum Function {
     Eridani {
         name: String,
@@ -94,39 +95,8 @@ pub(crate) enum Function {
     },
     Rust {
         name: String,
-        func: Box<dyn EridaniFunction>,
+        func: EridaniFunction,
     },
-}
-
-impl Clone for Function {
-    fn clone(&self) -> Self {
-        match self {
-            Function::Eridani { name, methods } => Function::Eridani {
-                name: name.clone(),
-                methods: methods.clone(),
-            },
-            Function::Rust { name, func } => Function::Rust {
-                name: name.clone(),
-                func: func.clone_box(),
-            },
-        }
-    }
-}
-
-impl fmt::Debug for Function {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Function::Rust { name, .. } => f
-                .debug_struct("Function::Rust")
-                .field("name", name)
-                .finish(),
-            Function::Eridani { name, methods } => f
-                .debug_struct("Function::Eridani")
-                .field("name", name)
-                .field("methods", methods)
-                .finish(),
-        }
-    }
 }
 
 impl PartialEq for Function {
@@ -151,12 +121,8 @@ impl PartialEq for Function {
                     name: _,
                     func: func2,
                 },
-            ) => {
-                let ptr1: *const Box<dyn EridaniFunction> = func1;
-                let ptr2: *const Box<dyn EridaniFunction> = func2;
+            ) => func1 == func2,
 
-                ptr1 == ptr2
-            }
             _ => false,
         }
     }
@@ -182,10 +148,7 @@ impl Ord for Function {
                 },
             ) => methods1.as_ptr().cmp(&methods2.as_ptr()),
             (Function::Rust { func: func1, .. }, Function::Rust { func: func2, .. }) => {
-                let ptr1: *const Box<dyn EridaniFunction> = func1;
-                let ptr2: *const Box<dyn EridaniFunction> = func2;
-
-                ptr1.cmp(&ptr2)
+                func1.cmp(&func2)
             }
             (Function::Eridani { .. }, Function::Rust { .. }) => Ordering::Greater,
             (Function::Rust { .. }, Function::Eridani { .. }) => Ordering::Less,
@@ -231,9 +194,9 @@ impl Function {
         }
     }
 
-    pub(crate) fn native(&mut self) -> Option<&mut dyn EridaniFunction> {
+    pub(crate) fn native(&mut self) -> Option<EridaniFunction> {
         if let Function::Rust { func, .. } = self {
-            Some(func)
+            Some(*func)
         } else {
             None
         }
