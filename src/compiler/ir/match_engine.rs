@@ -162,7 +162,7 @@ pub(super) fn partial_match(
                 return MatchResult::Fail;
             };
 
-            if name.is_some() && name.unwrap().1 {
+            if name.is_some() && !name.unwrap().1 {
                 variables.push(value.to_owned());
             }
         } else {
