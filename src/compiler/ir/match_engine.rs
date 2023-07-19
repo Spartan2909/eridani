@@ -109,7 +109,6 @@ pub(super) fn resolve_metapatterns(
 
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum MatchResult {
-    Error,
     Fail,
     Indeterminable,
     Success(Vec<Value>),
@@ -118,25 +117,23 @@ pub(super) enum MatchResult {
 impl MatchResult {
     pub(super) fn is_ok(&self) -> bool {
         match self {
-            MatchResult::Error | MatchResult::Fail => false,
+            MatchResult::Fail => false,
             MatchResult::Indeterminable | MatchResult::Success(_) => true,
         }
     }
 }
 
-impl FromIterator<MatchResult> for Option<Vec<Option<Vec<Value>>>> {
+impl FromIterator<MatchResult> for Vec<(usize, Vec<Value>)> {
     fn from_iter<T: IntoIterator<Item = MatchResult>>(iter: T) -> Self {
         let mut all_values = vec![];
 
-        for result in iter {
-            match result {
-                MatchResult::Error => return None,
-                MatchResult::Success(values) => all_values.push(Some(values)),
-                MatchResult::Fail | MatchResult::Indeterminable => all_values.push(None),
+        for (index, result) in iter.into_iter().enumerate() {
+            if let MatchResult::Success(values) = result {
+                all_values.push((index, values));
             }
         }
 
-        Some(all_values)
+        all_values
     }
 }
 

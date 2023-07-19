@@ -251,6 +251,10 @@ impl Function {
             *methods = vec![];
         }
     }
+
+    fn is_native(&self) -> bool {
+        matches!(self, Function::Rust { .. })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

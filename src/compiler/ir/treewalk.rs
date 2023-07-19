@@ -7,7 +7,7 @@ use crate::{
 };
 
 use alloc::{collections::VecDeque, rc::Rc};
-use core::{cell::RefCell, cmp::Ordering};
+use core::cell::RefCell;
 
 fn expr(
     expression: Expr,
@@ -70,14 +70,6 @@ fn expr(
                             let message =
                                 format!("Method does not match the arguments {:?}", arguments);
                             return Err(Error::new(line, "Match", "", &message));
-                        }
-                        MatchResult::Error => {
-                            return Err(Error::new(
-                                line,
-                                "Pattern",
-                                "",
-                                "Circular dependencies in method arguments",
-                            ))
                         }
                         MatchResult::Indeterminable => {
                             internal_error!("got `Indeterminable` from `match_args`")
@@ -203,11 +195,12 @@ fn native_function(function: &mut dyn EridaniFunction, args: &[Value]) -> Result
 }
 
 fn function(function: Rc<RefCell<Function>>, args: &[Value], line: usize) -> Result<Value> {
-    if let Some(native) = function.borrow_mut().native() {
-        return native_function(native, args);
+    if function.borrow().is_native() {
+        return native_function(function.borrow_mut().native().unwrap(), args);
     }
+    
 
-    let matches: Option<Vec<_>> = function
+    let matches: Vec<_> = function
         .borrow()
         .methods()
         .unwrap()
@@ -215,26 +208,17 @@ fn function(function: Rc<RefCell<Function>>, args: &[Value], line: usize) -> Res
         .map(|method| match_args(method.borrow().args(), args, method.borrow().arg_order()))
         .collect();
 
-    let matches = match matches {
-        Some(value) => value,
-        None => {
-            return Err(Error::new(
-                line,
-                "Pattern",
-                "",
-                "Circular dependencies in method arguments",
-            ))
-        }
-    };
-
-    let mut matches: Vec<_> = matches
-        .into_iter()
-        .enumerate()
-        .filter(|(_, values)| values.is_some())
-        .map(|(index, values)| (index, values.unwrap()))
-        .collect();
-
-    if matches.is_empty() {
+    if let Some((function_index, variables)) = VecDeque::from(matches).pop_front() {
+        Ok(expr(
+            function.borrow().methods().unwrap()[function_index]
+                .borrow()
+                .body()
+                .to_owned(),
+            variables,
+            function.borrow().name(),
+        )?
+        .0)
+    } else {
         let mut args_buf = String::with_capacity(args.len() * 6);
         for (i, arg) in args.iter().enumerate() {
             args_buf.push_str(&format!("{arg}"));
@@ -248,51 +232,6 @@ fn function(function: Rc<RefCell<Function>>, args: &[Value], line: usize) -> Res
             args_buf
         );
         Err(Error::new(line, "Match", "", &message))
-    } else if matches.len() == 1 {
-        let (function_index, bindings) = VecDeque::from(matches).pop_front().unwrap();
-        Ok(expr(
-            function.borrow().methods().unwrap()[function_index]
-                .borrow()
-                .body()
-                .to_owned(),
-            bindings,
-            function.borrow().name(),
-        )?
-        .0)
-    } else {
-        let precedences: Vec<_> = matches
-            .iter()
-            .map(|(index, bindings)| {
-                function.borrow().methods().unwrap()[*index]
-                    .borrow()
-                    .precedence
-            })
-            .collect();
-
-        let mut min_precedence = precedences[0];
-        let mut min_index = 0;
-
-        for (i, precedence) in precedences[1..].iter().enumerate() {
-            match precedence.cmp(&min_precedence) {
-                Ordering::Less => {
-                    min_precedence = *precedence;
-                    min_index = i;
-                }
-                Ordering::Equal => return Err(Error::new(line, "Match", "", "Method collision")),
-                _ => {}
-            }
-        }
-
-        let (function_index, variables) = matches.remove(min_index);
-        Ok(expr(
-            function.borrow().methods().unwrap()[function_index]
-                .borrow()
-                .body()
-                .to_owned(),
-            variables,
-            function.borrow().name(),
-        )?
-        .0)
     }
 }
 
