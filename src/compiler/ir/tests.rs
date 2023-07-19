@@ -1,10 +1,10 @@
 #[cfg(feature = "tree_walk")]
 mod test_with_treewalk {
-    use crate::compiler::{
+    use crate::{compiler::{
         ir::{analyse_unoptimised, optimise, treewalk::walk_tree},
         parser::parse,
         scanner::scan,
-    };
+    }, common::value::Value};
 
     #[test]
     fn fibonacci() {
@@ -12,19 +12,18 @@ mod test_with_treewalk {
 fibonacci is
     (n: 0 | 1) n
 
-    (n: Integer & > 0) do
+    (n: Integer & > 0)
         fibonacci(n - 1) + fibonacci(n - 2)
-    end
 
 main is
-    () print(fibonacci(20))
+    () fibonacci(20)
     ";
 
         let tokens = scan(SOURCE.to_owned()).unwrap();
         let parse_tree = parse(tokens).unwrap();
         let program = analyse_unoptimised(parse_tree, None, "main").unwrap();
-        walk_tree(&program, &[]).unwrap();
+        assert_eq!(walk_tree(&program, &[]).unwrap(), Value::Number(6765.0));
         let program = optimise(program).unwrap();
-        walk_tree(&program, &[]).unwrap();
+        assert_eq!(walk_tree(&program, &[]).unwrap(), Value::Number(6765.0));
     }
 }
