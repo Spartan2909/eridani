@@ -37,7 +37,7 @@ const RUNTIME_WEB: u8 = 0;
 
 pub const RUNTIME_FEATURES: RuntimeFeatures = RuntimeFeatures(RUNTIME_STD | RUNTIME_WEB);
 
-#[inline]
+#[inline(always)]
 pub const fn features_compatible(
     target_features: TargetFeatures,
     runtime_features: RuntimeFeatures,
