@@ -316,7 +316,7 @@ impl Method {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[cfg_attr(feature = "serialise", derive(Serialize, Deserialize))]
 pub(crate) struct Function {
     methods: Vec<Method>,
@@ -343,6 +343,10 @@ impl Function {
     }
 }
 
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serialise", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serialise", serde(into = "serialise::SerialiseProgram"))]
+#[cfg_attr(feature = "serialise", serde(try_from = "serialise::SerialiseProgram"))]
 pub struct Program {
     pub(crate) functions: Vec<Function>,
     pub(crate) natives: Vec<(EridaniFunction, String)>,

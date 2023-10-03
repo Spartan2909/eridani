@@ -129,3 +129,7 @@ pub(crate) const NATIVES: [(&str, NativeFunction); 5] = [
     ("string", basic::string),
     ("input", feature_std::input),
 ];
+
+pub(crate) fn get_native_index(f: NativeFunction) -> Option<usize> {
+    NATIVES.iter().position(|(_, native)| *native == f)
+}
