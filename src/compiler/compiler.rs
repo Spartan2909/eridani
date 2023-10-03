@@ -371,7 +371,7 @@ pub(super) fn compile(analysed: ir::Program) -> Program {
     let mut num_eridani = 0;
     let mut num_native = 0;
     for function in analysed.functions() {
-        let mut function_ref = function.borrow();
+        let function_ref = function.borrow();
         match &*function_ref {
             ir::Function::Eridani { .. } => {
                 drop(function_ref);

@@ -318,7 +318,7 @@ impl Drop for Module {
     fn drop(&mut self) {
         if let Some(library) = self.library {
             // SAFETY: `library` is the only pointer to this value
-            unsafe { Box::from_raw(library.as_ptr()) };
+            let _ = unsafe { Box::from_raw(library.as_ptr()) };
         }
 
         self.destroy();
