@@ -8,6 +8,7 @@ use crate::{
         parser,
         scanner::{Token, TokenType},
     },
+    prelude::*,
 };
 
 use core::cmp::max;

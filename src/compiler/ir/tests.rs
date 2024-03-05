@@ -3,6 +3,7 @@ mod test_with_treewalk {
     use crate::{
         common::value::Value,
         compiler::{
+            arena,
             ir::{analyse_unoptimised, optimise, treewalk::walk_tree},
             parser::parse,
             scanner::scan,
@@ -24,7 +25,8 @@ main is
 
         let tokens = scan(SOURCE.to_owned()).unwrap();
         let parse_tree = parse(tokens).unwrap();
-        let program = analyse_unoptimised(parse_tree, None, "main").unwrap();
+        let arena = arena::Arena::new();
+        let program = analyse_unoptimised(&arena, parse_tree, None, "main").unwrap();
         assert_eq!(walk_tree(&program, &[]).unwrap(), Value::Number(6765.0));
         let program = optimise(program).unwrap();
         assert_eq!(walk_tree(&program, &[]).unwrap(), Value::Number(6765.0));

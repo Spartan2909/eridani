@@ -1,11 +1,5 @@
 use core::{fmt, result};
 
-#[cfg(not(feature = "std"))]
-use core::error;
-
-#[cfg(feature = "std")]
-use std::error;
-
 mod arena;
 #[cfg(not(feature = "tree_walk"))]
 mod bytecode;
@@ -13,6 +7,8 @@ mod eridani_std;
 pub(crate) mod ir;
 pub(crate) mod parser;
 pub(crate) mod scanner;
+
+use crate::prelude::*;
 
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -50,7 +46,11 @@ impl From<Vec<Error>> for Error {
     }
 }
 
-impl error::Error for Error {}
+#[cfg(all(not(feature = "std"), feature = "error_trait"))]
+impl core::error::Error for Error {}
+
+#[cfg(feature = "std")]
+impl std::error::Error for Error {}
 
 impl Error {
     pub(crate) fn new(line: usize, kind: &'static str, location: &str, message: &str) -> Self {

@@ -1,4 +1,4 @@
-use crate::common::internal_error;
+use crate::{common::internal_error, prelude::*};
 
 use core::{
     cmp::Ordering,
@@ -12,8 +12,6 @@ use core::{
 use core::cell::RefCell;
 
 use alloc::collections::VecDeque;
-#[cfg(feature = "tree_walk")]
-use alloc::rc::Rc;
 
 #[cfg(feature = "serialise")]
 use serde::{Deserialize, Serialize};
@@ -53,7 +51,7 @@ pub enum Value {
 #[derive(Debug, Clone)]
 #[cfg(feature = "tree_walk")]
 pub(crate) enum Value {
-    Function(Rc<RefCell<crate::compiler::ir::Function>>),
+    Function(&RefCell<crate::compiler::ir::Function>),
     List(VecDeque<Value>),
     Nothing,
     Method(Box<crate::compiler::ir::Method>),

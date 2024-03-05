@@ -1,13 +1,13 @@
+#[cfg(feature = "std")]
+use crate::common::bytecode::{disassemble_chunk, disassemble_instruction};
 use crate::{
     common::{
-        bytecode::{
-            disassemble_chunk, disassemble_instruction, Chunk, ExprOpCode, Function, GenericOpCode,
-            OpCode, PatternOpCode, Program,
-        },
+        bytecode::{Chunk, ExprOpCode, Function, GenericOpCode, OpCode, PatternOpCode, Program},
         expect_option, internal_error,
         value::{FunctionKind, Type, Value},
         EridaniFunction,
     },
+    prelude::*,
     runtime::{ArgsFormatter, Error, Result},
 };
 
@@ -51,6 +51,7 @@ pub(super) struct Vm {
 #[allow(clippy::dbg_macro)]
 impl Drop for Vm {
     fn drop(&mut self) {
+        #[cfg(feature = "std")]
         if self.dropped_in_panic {
             dbg!(&self.stack);
         }
@@ -142,7 +143,7 @@ impl Vm {
         // and `Vm.functions` is never mutated
         let chunk = unsafe { frame.code.as_ref() };
         let byte = chunk.code()[frame.ip];
-        #[cfg(debug_assertions)]
+        #[cfg(all(debug_assertions, feature = "std"))]
         disassemble_instruction(chunk, frame.ip);
         frame.ip += 1;
         OpCode::from(byte)
@@ -255,7 +256,7 @@ impl Vm {
                     Value::Function(function) => {
                         if function.kind == FunctionKind::Eridani {
                             self.function(function.reference, args_start)?;
-                            #[cfg(debug_assertions)]
+                            #[cfg(all(debug_assertions, feature = "std"))]
                             println!();
                         } else {
                             let (native, name) = &mut self.natives[usize::from(function.reference)];
@@ -267,7 +268,7 @@ impl Vm {
                         }
                     }
                     Value::Method(method) => {
-                        #[cfg(debug_assertions)]
+                        #[cfg(all(debug_assertions, feature = "std"))]
                         disassemble_chunk(
                             &method.parameters().0,
                             "<lambda expression>",
@@ -286,7 +287,7 @@ impl Vm {
                             let variables = frame.variables;
                             self.stack.truncate(args_start);
 
-                            #[cfg(debug_assertions)]
+                            #[cfg(all(debug_assertions, feature = "std"))]
                             disassemble_chunk(method.chunk(), "<lambda expression>", "body", 0);
 
                             self.frames.push(CallFrame::new(
@@ -568,7 +569,7 @@ impl Vm {
                 i += 1;
                 continue;
             }
-            #[cfg(debug_assertions)]
+            #[cfg(all(debug_assertions, feature = "std"))]
             disassemble_chunk(
                 &method.parameters().0,
                 self.functions[index as usize].name(),
@@ -602,7 +603,7 @@ impl Vm {
 
         let chunk = self.functions[index as usize].methods()[method_index].chunk();
 
-        #[cfg(debug_assertions)]
+        #[cfg(all(debug_assertions, feature = "std"))]
         disassemble_chunk(
             chunk,
             self.functions[index as usize].name(),

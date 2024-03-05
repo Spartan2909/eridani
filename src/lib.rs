@@ -1,4 +1,5 @@
-#![cfg_attr(not(feature = "std"), no_std, feature(error_in_core))]
+#![cfg_attr(not(feature = "std"), no_std)]
+#![cfg_attr(feature = "error_trait", feature(error_in_core))]
 #![warn(
     clippy::cast_lossless,
     clippy::semicolon_if_nothing_returned,
@@ -29,6 +30,9 @@ extern crate alloc;
 
 mod prelude {
     pub use alloc::{
+        borrow::ToOwned,
+        boxed::Box,
+        format,
         string::{String, ToString},
         vec,
         vec::Vec,

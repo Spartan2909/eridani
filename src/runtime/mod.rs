@@ -6,9 +6,10 @@ use core::error;
 #[cfg(all(feature = "std", feature = "error_trait"))]
 use std::error;
 
-use crate::common::ArgumentError;
-
-use crate::common::{bytecode::Program, value::Value};
+use crate::{
+    common::{bytecode::Program, value::Value, ArgumentError},
+    prelude::*,
+};
 
 mod vm;
 

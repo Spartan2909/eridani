@@ -1,4 +1,7 @@
-use crate::common::{value::Value, ArgumentError};
+use crate::{
+    common::{value::Value, ArgumentError},
+    prelude::*,
+};
 
 fn get(args: &[Value], index: usize) -> Result<Value, ArgumentError> {
     if let Some(value) = args.get(index) {
@@ -21,7 +24,10 @@ fn get_string(args: &[Value], index: usize) -> Result<String, ArgumentError> {
 }
 
 mod basic {
-    use crate::common::{natives::get, value::Value, ArgumentError};
+    use crate::{
+        common::{natives::get, value::Value, ArgumentError},
+        prelude::*,
+    };
 
     pub(crate) fn index(args: &[Value]) -> Result<Value, ArgumentError> {
         let list = get(args, 0)?;

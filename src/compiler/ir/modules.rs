@@ -1,9 +1,4 @@
-//#[cfg(feature = "std")]
-//mod ffi;
-//#[cfg(feature = "std")]
-//use ffi::{load_foreign_module, FOREIGN_MODULE_EXTENSION};
-
-use core::{cell::RefCell, ptr::NonNull};
+use core::cell::RefCell;
 
 use alloc::collections::BTreeMap;
 
@@ -17,11 +12,12 @@ use crate::{
     common::internal_error,
     compiler::{
         arena::Arena,
-        ir::{clone_bindings, converter::analyse_module, Binding, Function, Library},
+        ir::{clone_bindings, converter::analyse_module, Binding, Function},
         parser::{self, ImportTree, ParseTree},
         scanner::{self, Token, TokenType},
         Error, Result,
     },
+    prelude::*,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,9 +26,8 @@ pub(super) enum Visibility {
     Private,
 }
 
-#[cfg(feature = "std")]
 enum ModuleFile {
-    //Foreign(PathBuf),
+    #[cfg(feature = "std")]
     Source(String, PathBuf),
 }
 
@@ -45,7 +40,6 @@ pub(super) struct Module<'arena> {
     bindings: BTreeMap<String, Binding<'arena>>,
     supermodule: Option<&'arena RefCell<Module<'arena>>>,
     origin: Option<String>,
-    library: Option<NonNull<Library>>,
 }
 
 impl<'arena> PartialEq for Module<'arena> {
@@ -69,7 +63,6 @@ impl<'arena> Module<'arena> {
             bindings,
             supermodule,
             origin,
-            library: None,
         }
     }
 
@@ -194,7 +187,7 @@ impl<'arena> Module<'arena> {
     }
 
     fn find_submodule_file(&self, name: &str) -> Option<ModuleFile> {
-        #[cfg(not(feature = "no_std"))]
+        #[cfg(feature = "std")]
         if let Some(supermodule_origin) = &self.origin {
             let supermodule_origin = path::PathBuf::from(supermodule_origin);
             let supermodule_filename = supermodule_origin
@@ -228,32 +221,6 @@ impl<'arena> Module<'arena> {
                     return Some(ModuleFile::Source(contents, module_file));
                 }
             }
-
-            /*
-            let paths_to_try = if supermodule_filename == "mod.eri" {
-                [
-                    format!("{name}.{FOREIGN_MODULE_EXTENSION}"),
-                    format!("{name}/mod.{FOREIGN_MODULE_EXTENSION}"),
-                ]
-            } else {
-                let module_name = supermodule_filename
-                    .rsplit_once('.')
-                    .unwrap_or_else(|| internal_error!("source file without extension"))
-                    .0;
-                [
-                    format!("{module_name}/{name}.{FOREIGN_MODULE_EXTENSION}"),
-                    format!("{module_name}/{name}/mod.{FOREIGN_MODULE_EXTENSION}"),
-                ]
-            };
-
-            for path in paths_to_try {
-                let mut module_file = supermodule_folder.to_owned();
-                module_file.push(path);
-                if module_file.try_exists().unwrap_or(false) {
-                    return Some(ModuleFile::Foreign(module_file));
-                }
-            }
-            */
         }
 
         None
@@ -272,7 +239,7 @@ impl<'arena> Module<'arena> {
         let possible_source = this.borrow().find_submodule_file(name);
         if let Some(module_file) = possible_source {
             match module_file {
-                //ModuleFile::Foreign(path) => load_foreign_module(path, name, this, line),
+                #[cfg(feature = "std")]
                 ModuleFile::Source(source, path) => {
                     let submodule_parse_tree = parser::parse(scanner::scan(source)?)?;
                     let submodule = arena.allocate(RefCell::new(Module::new(
@@ -289,6 +256,8 @@ impl<'arena> Module<'arena> {
 
                     Ok(submodule)
                 }
+                #[cfg(not(feature = "std"))]
+                _ => unreachable!(),
             }
         } else {
             let location = format!(" at {name}");
@@ -298,19 +267,6 @@ impl<'arena> Module<'arena> {
                 &location,
                 "Cannot resolve submodule",
             ))
-        }
-    }
-
-    pub(super) fn take_library(&mut self) -> Option<NonNull<Library>> {
-        self.library.take()
-    }
-}
-
-impl<'arena> Drop for Module<'arena> {
-    fn drop(&mut self) {
-        if let Some(library) = self.library {
-            // SAFETY: `library` is the only pointer to this value
-            let _ = unsafe { Box::from_raw(library.as_ptr()) };
         }
     }
 }

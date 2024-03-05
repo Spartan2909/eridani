@@ -1,9 +1,14 @@
+#[cfg(feature = "std")]
 mod disassembler;
+#[cfg(feature = "std")]
 pub(crate) use disassembler::{disassemble_chunk, disassemble_instruction};
 #[cfg(feature = "serialise")]
 mod serialise;
 
-use crate::common::{discriminant::TargetFeatures, internal_error, value::Value, EridaniFunction};
+use crate::{
+    common::{discriminant::TargetFeatures, internal_error, value::Value, EridaniFunction},
+    prelude::*,
+};
 
 use core::mem;
 

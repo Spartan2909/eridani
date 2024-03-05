@@ -14,6 +14,7 @@ use crate::{
         scanner::{self, TokenType},
         Error, Result,
     },
+    prelude::*,
 };
 
 use core::cell::RefCell;
@@ -148,15 +149,7 @@ pub(super) fn convert<'arena>(
         }
     }
 
-    let mut program = Program::new(entry_point, functions);
-
-    for module in modules {
-        if let Some(library) = module.borrow_mut().take_library() {
-            program.push_library(library);
-        }
-    }
-
-    Ok(program)
+    Ok(Program::new(entry_point, functions))
 }
 
 pub(super) fn analyse_module<'arena>(

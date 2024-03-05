@@ -4,6 +4,7 @@ use crate::{
         ir::{match_engine::partial_match, Expr, Program},
         Error, Result,
     },
+    prelude::*,
 };
 
 fn fold_constants(body: &mut Expr) -> Result<()> {

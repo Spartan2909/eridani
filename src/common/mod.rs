@@ -6,6 +6,8 @@ pub(crate) mod natives;
 pub(crate) mod value;
 use value::Value;
 
+use crate::prelude::*;
+
 #[derive(Debug, Clone)]
 pub struct ArgumentError {
     description: String,

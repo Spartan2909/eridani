@@ -1,5 +1,7 @@
 use core::{cell::UnsafeCell, ptr};
 
+use crate::prelude::*;
+
 pub struct Arena {
     managed: UnsafeCell<Vec<Droppable>>,
 }
@@ -25,8 +27,10 @@ impl Arena {
 
         // SAFETY: This is the only active reference to `self`.
         let managed = unsafe { &mut *self.managed.get() };
-        let fun = |x| drop::<T>(x);
-        managed.push(Droppable::new((ptr as *mut T).cast(), Box::new(fun)));
+        managed.push(Droppable::new(
+            (ptr as *mut T).cast(),
+            Box::new(|x| drop::<T>(x)),
+        ));
 
         ptr
     }

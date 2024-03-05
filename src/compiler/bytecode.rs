@@ -9,6 +9,7 @@ use crate::{
         EridaniFunction,
     },
     compiler::ir::{self, pattern},
+    prelude::*,
 };
 
 use core::{cell::RefCell, fmt};

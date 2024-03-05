@@ -1,6 +1,9 @@
 use core::fmt;
 
-use super::{Error, Result};
+use crate::{
+    compiler::{Error, Result},
+    prelude::*,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenType {

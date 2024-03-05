@@ -15,22 +15,18 @@ use crate::{
         parser::{ImportTree, ParseTree},
         Result,
     },
+    prelude::*,
 };
 
-use core::{cell::RefCell, cmp::Ordering, fmt, mem, ptr::NonNull};
+use core::{cell::RefCell, cmp::Ordering, fmt, ptr::NonNull};
 
 use alloc::collections::BTreeMap;
 
 use bimap::BiMap;
 
-#[cfg(feature = "std")]
-use libloading::Library;
-
 pub(crate) struct Program<'arena> {
     entry_point: &'arena RefCell<Function<'arena>>,
     functions: Vec<&'arena RefCell<Function<'arena>>>,
-    #[cfg(feature = "std")]
-    libraries: Vec<NonNull<Library>>,
 }
 
 impl<'arena> Program<'arena> {
@@ -41,8 +37,6 @@ impl<'arena> Program<'arena> {
         Program {
             entry_point,
             functions,
-            #[cfg(feature = "std")]
-            libraries: vec![],
         }
     }
 
@@ -52,30 +46,6 @@ impl<'arena> Program<'arena> {
 
     pub(super) fn functions(&self) -> &Vec<&'arena RefCell<Function<'arena>>> {
         &self.functions
-    }
-
-    #[cfg(feature = "std")]
-    pub(super) fn libraries(&mut self) -> Vec<NonNull<Library>> {
-        mem::take(&mut self.libraries)
-    }
-
-    #[cfg(feature = "std")]
-    fn push_library(&mut self, library: NonNull<Library>) {
-        self.libraries.push(library);
-    }
-
-    #[cfg(not(feature = "std"))]
-    #[inline(always)]
-    fn push_library<T>(&self, _library: T) {}
-}
-
-impl<'arena> Drop for Program<'arena> {
-    fn drop(&mut self) {
-        #[cfg(feature = "std")]
-        for &library in &self.libraries {
-            // SAFETY: this is the only pointer to this value
-            unsafe { drop(Box::from_raw(library.as_ptr())) };
-        }
     }
 }
 
