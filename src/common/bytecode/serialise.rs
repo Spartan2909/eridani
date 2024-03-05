@@ -1,8 +1,8 @@
 use crate::common::{
-    bytecode::{Program, Function},
+    bytecode::{Function, Program},
+    discriminant::TargetFeatures,
     natives::{get_native_index, NATIVES},
     EridaniFunction,
-    discriminant::TargetFeatures,
 };
 
 use serde::{Deserialize, Serialize};
@@ -49,7 +49,12 @@ pub(super) struct SerialiseProgram {
 
 impl From<Program> for SerialiseProgram {
     fn from(value: Program) -> Self {
-        SerialiseProgram { functions: value.functions, natives: value.natives.into(), entry_point: value.entry_point, features: value.features }
+        SerialiseProgram {
+            functions: value.functions,
+            natives: value.natives.into(),
+            entry_point: value.entry_point,
+            features: value.features,
+        }
     }
 }
 
@@ -57,6 +62,11 @@ impl TryFrom<SerialiseProgram> for Program {
     type Error = &'static str;
 
     fn try_from(value: SerialiseProgram) -> Result<Self, Self::Error> {
-        Ok(Program { functions: value.functions, natives: value.natives.try_into()?, entry_point: value.entry_point, features: value.features })
+        Ok(Program {
+            functions: value.functions,
+            natives: value.natives.try_into()?,
+            entry_point: value.entry_point,
+            features: value.features,
+        })
     }
 }

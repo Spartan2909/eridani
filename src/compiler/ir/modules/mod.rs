@@ -3,15 +3,9 @@
 //#[cfg(feature = "std")]
 //use ffi::{load_foreign_module, FOREIGN_MODULE_EXTENSION};
 
-use core::{
-    cell::{RefCell, RefMut},
-    ptr::NonNull,
-};
+use core::{cell::RefCell, ptr::NonNull};
 
-use alloc::{
-    collections::BTreeMap,
-    rc::{Rc, Weak},
-};
+use alloc::collections::BTreeMap;
 
 #[cfg(feature = "std")]
 use std::{
@@ -22,6 +16,7 @@ use std::{
 use crate::{
     common::internal_error,
     compiler::{
+        arena::Arena,
         ir::{clone_bindings, converter::analyse_module, Binding, Function, Library},
         parser::{self, ImportTree, ParseTree},
         scanner::{self, Token, TokenType},
@@ -42,37 +37,37 @@ enum ModuleFile {
 }
 
 #[derive(Debug)]
-pub(super) struct Module {
+pub(super) struct Module<'arena> {
     name: String,
-    submodules: Vec<(Rc<RefCell<Module>>, Visibility)>,
-    functions: Vec<Rc<RefCell<Function>>>,
+    submodules: Vec<(&'arena RefCell<Module<'arena>>, Visibility)>,
+    functions: Vec<&'arena RefCell<Function<'arena>>>,
     function_names: Vec<String>,
-    bindings: BTreeMap<String, Binding>,
-    supermodule: Weak<RefCell<Module>>,
+    bindings: BTreeMap<String, Binding<'arena>>,
+    supermodule: Option<&'arena RefCell<Module<'arena>>>,
     origin: Option<String>,
     library: Option<NonNull<Library>>,
 }
 
-impl PartialEq for Module {
+impl<'arena> PartialEq for Module<'arena> {
     fn eq(&self, other: &Self) -> bool {
         self.name.as_ptr() as usize == other.name.as_ptr() as usize
     }
 }
 
-impl Module {
+impl<'arena> Module<'arena> {
     pub fn new(
         name: &str,
-        bindings: BTreeMap<String, Binding>,
+        bindings: BTreeMap<String, Binding<'arena>>,
         origin: Option<String>,
-        supermodule: Option<&Rc<RefCell<Module>>>,
-    ) -> Module {
+        supermodule: Option<&'arena RefCell<Module<'arena>>>,
+    ) -> Module<'arena> {
         Module {
             name: name.to_string(),
             submodules: vec![],
             functions: vec![],
             function_names: vec![],
             bindings,
-            supermodule: supermodule.map(Rc::downgrade).unwrap_or(Weak::new()),
+            supermodule,
             origin,
             library: None,
         }
@@ -82,23 +77,27 @@ impl Module {
         &self.name
     }
 
-    pub fn functions(&self) -> &Vec<Rc<RefCell<Function>>> {
+    pub fn functions(&self) -> &Vec<&'arena RefCell<Function<'arena>>> {
         &self.functions
     }
 
-    pub fn bindings(&self) -> &BTreeMap<String, Binding> {
+    pub fn bindings(&self) -> &BTreeMap<String, Binding<'arena>> {
         &self.bindings
     }
 
-    pub fn push_function(&mut self, function: Rc<RefCell<Function>>) {
+    pub fn push_function(&mut self, function: &'arena RefCell<Function<'arena>>) {
         self.functions.push(function);
     }
 
-    pub fn push_submodule(&mut self, submodule: Rc<RefCell<Module>>, visibility: Visibility) {
+    pub fn push_submodule(
+        &mut self,
+        submodule: &'arena RefCell<Module<'arena>>,
+        visibility: Visibility,
+    ) {
         self.submodules.push((submodule, visibility));
     }
 
-    pub fn add_binding(&mut self, name: String, binding: Binding) {
+    pub fn add_binding(&mut self, name: String, binding: Binding<'arena>) {
         self.bindings.insert(name, binding);
     }
 
@@ -125,9 +124,13 @@ impl Module {
         Ok(())
     }
 
-    pub fn get_binding(&self, name: &str, looking_from_module_tree: bool) -> Option<Binding> {
+    pub fn get_binding(
+        &self,
+        name: &str,
+        looking_from_module_tree: bool,
+    ) -> Option<Binding<'arena>> {
         if let Some(module) = self.find_submodule(name, looking_from_module_tree) {
-            Some(Binding::Module(Rc::clone(module)))
+            Some(Binding::Module(module))
         } else {
             self.find_function(name).map(Binding::Function)
         }
@@ -137,7 +140,7 @@ impl Module {
         &self,
         name: &str,
         looking_from_module_tree: bool,
-    ) -> Option<&Rc<RefCell<Module>>> {
+    ) -> Option<&'arena RefCell<Module<'arena>>> {
         for (submodule, visibility) in &self.submodules {
             if submodule.borrow().name == name
                 && (looking_from_module_tree || *visibility == Visibility::Public)
@@ -149,38 +152,23 @@ impl Module {
         None
     }
 
-    pub fn find_function(&self, name: &str) -> Option<Rc<RefCell<Function>>> {
+    pub fn find_function(&self, name: &str) -> Option<&'arena RefCell<Function<'arena>>> {
         for function in &self.functions {
             if function.borrow().name() == name {
-                return Some(Rc::clone(function));
+                return Some(*function);
             }
         }
 
         None
     }
 
-    pub fn destroy(&mut self) {
-        for (submodule, _) in &self.submodules {
-            if let Ok(mut submodule) = submodule.try_borrow_mut() {
-                submodule.destroy();
-            }
-        }
-        self.submodules = vec![];
-        self.functions = vec![];
-        for binding in self.bindings.values() {
-            if let Binding::Module(module) = binding {
-                if let Ok(mut module) = module.try_borrow_mut() {
-                    module.destroy();
-                }
-            }
-        }
-        self.bindings.clear();
-    }
-
     /// Returns the module and whether that module is in the current module tree
-    pub fn find_imported_module(&self, name: &Token) -> Result<(Rc<RefCell<Module>>, bool)> {
+    pub fn find_imported_module(
+        &self,
+        name: &Token,
+    ) -> Result<(&'arena RefCell<Module<'arena>>, bool)> {
         if name.kind() == TokenType::Super {
-            if let Some(supermodule) = self.supermodule.upgrade() {
+            if let Some(supermodule) = self.supermodule {
                 return Ok((supermodule, true));
             } else {
                 return Err(Error::new(
@@ -191,9 +179,9 @@ impl Module {
                 ));
             }
         } else if let Some(module) = self.find_submodule(name.lexeme(), true) {
-            return Ok((Rc::clone(module), true));
+            return Ok((module, true));
         } else if let Some(Binding::Module(module)) = self.bindings.get(name.lexeme()) {
-            return Ok((Rc::clone(module), false));
+            return Ok((*module, false));
         }
 
         let location = format!(" at '{}'", name.lexeme());
@@ -272,12 +260,13 @@ impl Module {
     }
 
     pub fn resolve_submodule(
-        this: &Rc<RefCell<Module>>,
+        arena: &'arena Arena,
+        this: &'arena RefCell<Module<'arena>>,
         name: &str,
         line: usize,
-        modules: &mut Vec<Rc<RefCell<Module>>>,
+        modules: &mut Vec<&'arena RefCell<Module<'arena>>>,
         visibility: Visibility,
-    ) -> Result<Rc<RefCell<Module>>> {
+    ) -> Result<&'arena RefCell<Module<'arena>>> {
         // Storing the possible source in a variable prior to the `if let` allows the
         // `Ref` to be dropped before subsequent calls to `borrow_mut()`
         let possible_source = this.borrow().find_submodule_file(name);
@@ -286,18 +275,17 @@ impl Module {
                 //ModuleFile::Foreign(path) => load_foreign_module(path, name, this, line),
                 ModuleFile::Source(source, path) => {
                     let submodule_parse_tree = parser::parse(scanner::scan(source)?)?;
-                    let submodule = Rc::new(RefCell::new(Module::new(
+                    let submodule = arena.allocate(RefCell::new(Module::new(
                         name,
                         clone_bindings(&this.borrow().bindings),
                         Some(path.to_string_lossy().into()),
                         Some(this),
                     )));
-                    modules.push(Rc::clone(&submodule));
+                    modules.push(submodule);
+                    this.borrow_mut().push_submodule(submodule, visibility);
                     this.borrow_mut()
-                        .push_submodule(Rc::clone(&submodule), visibility);
-                    this.borrow_mut()
-                        .add_binding(name.to_string(), Binding::Module(Rc::clone(&submodule)));
-                    analyse_module(submodule_parse_tree, &submodule, modules)?;
+                        .add_binding(name.to_string(), Binding::Module(submodule));
+                    analyse_module(arena, submodule_parse_tree, submodule, modules)?;
 
                     Ok(submodule)
                 }
@@ -312,51 +300,39 @@ impl Module {
             ))
         }
     }
+
+    pub(super) fn take_library(&mut self) -> Option<NonNull<Library>> {
+        self.library.take()
+    }
 }
 
-impl Drop for Module {
+impl<'arena> Drop for Module<'arena> {
     fn drop(&mut self) {
         if let Some(library) = self.library {
             // SAFETY: `library` is the only pointer to this value
             let _ = unsafe { Box::from_raw(library.as_ptr()) };
         }
-
-        self.destroy();
     }
 }
 
-pub(super) fn get_library(mut module: RefMut<Module>) -> Option<NonNull<Library>> {
-    if let Some(library) = module.library {
-        module.library = None;
-        Some(library)
-    } else {
-        None
-    }
-}
-
-pub(super) fn resolve_import(
+pub(super) fn resolve_import<'arena>(
     mut import: ImportTree,
-    mut import_module: Rc<RefCell<Module>>,
+    mut import_module: &'arena RefCell<Module<'arena>>,
     looking_from_module_tree: bool,
-) -> Result<Binding> {
-    let mut binding = Binding::Module(Rc::clone(&import_module));
+) -> Result<Binding<'arena>> {
+    let mut binding = Binding::Module(import_module);
     while let Some(next) = import.next() {
         let tmp: &ImportTree = next;
         import = tmp.clone();
 
         if import.name().kind() == TokenType::Super {
-            let supermodule =
-                import_module
-                    .borrow()
-                    .supermodule
-                    .upgrade()
-                    .unwrap_or(Err(Error::new(
-                        import.line(),
-                        "Import",
-                        "",
-                        "'super' used in top-level module",
-                    ))?);
-            binding = Binding::Module(Rc::clone(&supermodule));
+            let supermodule = import_module.borrow().supermodule.unwrap_or(Err(Error::new(
+                import.line(),
+                "Import",
+                "",
+                "'super' used in top-level module",
+            ))?);
+            binding = Binding::Module(supermodule);
             import_module = supermodule;
         } else {
             binding = match import_module
@@ -370,10 +346,7 @@ pub(super) fn resolve_import(
                         .function_names
                         .contains(import.name().lexeme())
                     {
-                        Binding::PlaceHolder(
-                            import.name().lexeme().to_owned(),
-                            Rc::clone(&import_module),
-                        )
+                        Binding::PlaceHolder(import.name().lexeme().to_owned(), import_module)
                     } else {
                         return Err(Error::new(
                             import.line(),
@@ -387,7 +360,7 @@ pub(super) fn resolve_import(
 
             if import.next().is_some() {
                 if let Binding::Module(module) = &binding {
-                    import_module = Rc::clone(module);
+                    import_module = *module;
                 } else if let Binding::Function(_) = &binding {
                     let location = format!(" at {}", import.name().lexeme());
                     return Err(Error::new(

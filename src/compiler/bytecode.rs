@@ -13,15 +13,15 @@ use crate::{
 
 use core::{cell::RefCell, fmt};
 
-use alloc::{collections::BTreeMap, rc::Rc};
+use alloc::collections::BTreeMap;
 
-struct Functions {
+struct Functions<'arena> {
     eridani: Vec<Function>,
     native: Vec<(EridaniFunction, String)>,
-    references: BTreeMap<Rc<RefCell<ir::Function>>, (FunctionKind, u16)>,
+    references: BTreeMap<&'arena RefCell<ir::Function<'arena>>, (FunctionKind, u16)>,
 }
 
-impl Functions {
+impl<'arena> Functions<'arena> {
     fn new() -> Self {
         Functions {
             eridani: vec![],
@@ -31,8 +31,8 @@ impl Functions {
     }
 }
 
-impl fmt::Debug for Functions {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl<'arena> fmt::Debug for Functions<'arena> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("Functions")
             .field("eridani", &self.eridani)
             .field(
@@ -205,7 +205,7 @@ fn compile_pattern(
     }
 }
 
-fn compile_expr(expr: &ir::Expr, chunk: &mut Chunk, functions: &Functions) {
+fn compile_expr<'arena>(expr: &ir::Expr<'arena>, chunk: &mut Chunk, functions: &Functions<'arena>) {
     match expr {
         ir::Expr::Binary {
             left,
@@ -307,7 +307,7 @@ fn compile_expr(expr: &ir::Expr, chunk: &mut Chunk, functions: &Functions) {
     }
 }
 
-fn compile_method(method: &ir::Method, functions: &Functions) -> Method {
+fn compile_method<'arena>(method: &ir::Method<'arena>, functions: &Functions<'arena>) -> Method {
     let mut chunk = Chunk::new();
     compile_expr(method.body(), &mut chunk, functions);
     chunk.push_instruction(ExprOpCode::Return, method.body().line());
@@ -351,10 +351,10 @@ fn compile_method(method: &ir::Method, functions: &Functions) -> Method {
     Method::new(chunk, Parameters(parameters), method.args().len())
 }
 
-fn compile_function(
-    methods: &[Rc<RefCell<ir::Method>>],
+fn compile_function<'arena>(
+    methods: &[&'arena RefCell<ir::Method<'arena>>],
     name: String,
-    functions: &Functions,
+    functions: &Functions<'arena>,
 ) -> Function {
     let mut compiled_methods = Vec::with_capacity(methods.len());
     for method in methods {
@@ -370,14 +370,14 @@ pub(super) fn compile(analysed: ir::Program) -> Program {
 
     let mut num_eridani = 0;
     let mut num_native = 0;
-    for function in analysed.functions() {
+    for function in ir::Program::functions(&analysed) {
         let function_ref = function.borrow();
         match &*function_ref {
             ir::Function::Eridani { .. } => {
                 drop(function_ref);
                 functions
                     .references
-                    .insert(Rc::clone(function), (FunctionKind::Eridani, num_eridani));
+                    .insert(*function, (FunctionKind::Eridani, num_eridani));
                 num_eridani += 1;
             }
             ir::Function::Rust { name, func } => {
@@ -385,7 +385,7 @@ pub(super) fn compile(analysed: ir::Program) -> Program {
                 drop(function_ref);
                 functions
                     .references
-                    .insert(Rc::clone(function), (FunctionKind::Native, num_native));
+                    .insert(*function, (FunctionKind::Native, num_native));
                 num_native += 1;
             }
         }
@@ -400,7 +400,7 @@ pub(super) fn compile(analysed: ir::Program) -> Program {
         }
     }
 
-    let (_, entry_point) = expect_option!(functions.references.get(analysed.entry_point()));
+    let (_, entry_point) = expect_option!(functions.references.get(&analysed.entry_point()));
 
     let Functions {
         eridani,
