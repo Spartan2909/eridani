@@ -65,10 +65,8 @@ impl Error {
 
 pub type Result<T> = result::Result<T, Error>;
 
-#[cfg(not(feature = "tree_walk"))]
 use crate::common::bytecode::Program;
 
-#[cfg(not(feature = "tree_walk"))]
 pub fn compile(
     source: String,
     source_origin: Option<String>,
@@ -77,6 +75,7 @@ pub fn compile(
     let tokens = scanner::scan(source)?;
     let parse_tree = parser::parse(tokens)?;
     let arena = arena::Arena::new();
-    let analysed = ir::analyse(&arena, parse_tree, source_origin, entry_point)?;
-    Ok(bytecode::compile(analysed))
+    let analysed = ir::analyse(&arena, &parse_tree, source_origin, entry_point)?;
+    let code = bytecode::compile(&analysed);
+    Ok(code)
 }

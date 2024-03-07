@@ -1,61 +1,50 @@
-use core::{cell::UnsafeCell, ptr};
+use core::{cell::UnsafeCell, ptr::NonNull};
 
 use crate::prelude::*;
 
-pub struct Arena {
-    managed: UnsafeCell<Vec<Droppable>>,
+pub struct Arena<'arena> {
+    managed: UnsafeCell<Vec<NonNull<dyn Droppable + 'arena>>>,
 }
 
-impl Arena {
-    pub const fn new() -> Arena {
+impl<'arena> Arena<'arena> {
+    pub const fn new() -> Arena<'arena> {
         Arena {
             managed: UnsafeCell::new(Vec::new()),
         }
     }
 
     #[allow(clippy::mut_from_ref)]
-    pub fn allocate<'arena, T: 'arena>(&'arena self, value: T) -> &'arena mut T {
-        fn drop<T>(ptr: *mut ()) {
-            let ptr: *mut T = ptr.cast();
-            // SAFETY: This must be the last pointer to `ptr`.
-            unsafe {
-                ptr::drop_in_place(ptr);
-            }
-        }
+    pub fn allocate<T: 'arena>(&self, value: T) -> &'arena mut T {
+        let value = Box::leak(Box::new(value));
+        let ptr = value as *mut T;
 
-        let ptr = Box::leak(Box::new(value));
+        let value = value as &mut dyn Droppable;
 
         // SAFETY: This is the only active reference to `self`.
         let managed = unsafe { &mut *self.managed.get() };
-        managed.push(Droppable::new(
-            (ptr as *mut T).cast(),
-            Box::new(|x| drop::<T>(x)),
-        ));
+        managed.push(NonNull::from(value));
 
-        ptr
+        unsafe { &mut *ptr }
     }
 
     pub fn collect(&mut self) {
-        for value in self.managed.get_mut() {
-            (value.drop)(value.ptr);
+        for &mut value in self.managed.get_mut() {
+            unsafe {
+                drop(Box::from_raw(value.as_ptr()));
+            }
         }
         self.managed.get_mut().clear();
     }
 }
 
-impl Drop for Arena {
+impl<'arena> Drop for Arena<'arena> {
     fn drop(&mut self) {
         self.collect();
     }
 }
 
-struct Droppable {
-    ptr: *mut (),
-    drop: Box<dyn FnMut(*mut ())>,
+trait Droppable {
+    fn drop(self: Box<Self>) {}
 }
 
-impl Droppable {
-    const fn new(ptr: *mut (), drop: Box<dyn FnMut(*mut ())>) -> Droppable {
-        Droppable { ptr, drop }
-    }
-}
+impl<T> Droppable for T {}

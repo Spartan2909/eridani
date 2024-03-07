@@ -366,19 +366,19 @@ fn compile_function<'arena>(
     Function::new(compiled_methods, name)
 }
 
-pub(super) fn compile(analysed: ir::Program) -> Program {
+pub(super) fn compile(analysed: &ir::Program) -> Program {
     let mut functions = Functions::new();
 
     let mut num_eridani = 0;
     let mut num_native = 0;
-    for function in ir::Program::functions(&analysed) {
+    for &function in analysed.functions() {
         let function_ref = function.borrow();
         match &*function_ref {
             ir::Function::Eridani { .. } => {
                 drop(function_ref);
                 functions
                     .references
-                    .insert(*function, (FunctionKind::Eridani, num_eridani));
+                    .insert(function, (FunctionKind::Eridani, num_eridani));
                 num_eridani += 1;
             }
             ir::Function::Rust { name, func } => {
@@ -386,14 +386,14 @@ pub(super) fn compile(analysed: ir::Program) -> Program {
                 drop(function_ref);
                 functions
                     .references
-                    .insert(*function, (FunctionKind::Native, num_native));
+                    .insert(function, (FunctionKind::Native, num_native));
                 num_native += 1;
             }
         }
     }
     functions.eridani = Vec::with_capacity(num_eridani.into());
 
-    for function in analysed.functions() {
+    for &function in analysed.functions() {
         if let ir::Function::Eridani { methods, name } = &*function.borrow() {
             functions
                 .eridani

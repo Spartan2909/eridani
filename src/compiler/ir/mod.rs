@@ -645,8 +645,8 @@ fn clone_bindings<'arena>(
 
 #[cfg(test)]
 fn analyse_unoptimised<'arena>(
-    arena: &'arena Arena,
-    parse_tree: ParseTree,
+    arena: &Arena<'arena>,
+    parse_tree: &ParseTree,
     source_origin: Option<String>,
     entry_point: &str,
 ) -> Result<Program<'arena>> {
@@ -661,12 +661,12 @@ fn optimise(program: Program) -> Result<Program> {
 }
 
 pub(super) fn analyse<'arena>(
-    arena: &'arena Arena,
-    parse_tree: ParseTree,
+    arena: &Arena<'arena>,
+    parse_tree: &ParseTree,
     source_origin: Option<String>,
     entry_point: &str,
 ) -> Result<Program<'arena>> {
-    let converted = converter::convert(arena, parse_tree, source_origin, entry_point)?;
+    let converted = converter::convert(arena, &parse_tree, source_origin, entry_point)?;
     let checked = checker::check_before_optimisation(converted)?;
     let optimised = optimiser::optimise(checked)?;
     Ok(optimised)

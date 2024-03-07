@@ -227,7 +227,7 @@ impl<'arena> Module<'arena> {
     }
 
     pub fn resolve_submodule(
-        arena: &'arena Arena,
+        arena: &Arena<'arena>,
         this: &'arena RefCell<Module<'arena>>,
         name: &str,
         line: usize,
@@ -252,7 +252,7 @@ impl<'arena> Module<'arena> {
                     this.borrow_mut().push_submodule(submodule, visibility);
                     this.borrow_mut()
                         .add_binding(name.to_string(), Binding::Module(submodule));
-                    analyse_module(arena, submodule_parse_tree, submodule, modules)?;
+                    analyse_module(arena, &submodule_parse_tree, submodule, modules)?;
 
                     Ok(submodule)
                 }

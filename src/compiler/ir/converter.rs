@@ -42,7 +42,7 @@ impl<'arena> Calls<'arena> {
 
 #[allow(clippy::type_complexity)]
 fn get_std<'arena>(
-    arena: &'arena Arena,
+    arena: &Arena<'arena>,
 ) -> Result<(
     Vec<&'arena RefCell<Module<'arena>>>,
     BTreeMap<String, Binding<'arena>>,
@@ -84,7 +84,7 @@ fn get_std<'arena>(
     let mut modules = vec![std_module, natives_module];
 
     let eridani_std = parser::parse(scanner::scan(eridani_std)?)?;
-    analyse_module(arena, eridani_std, std_module, &mut modules)?;
+    analyse_module(arena, &eridani_std, std_module, &mut modules)?;
 
     let prelude = compiler::eridani_std::PRELUDE;
     let mut bindings = BTreeMap::new();
@@ -102,8 +102,8 @@ fn get_std<'arena>(
 }
 
 pub(super) fn convert<'arena>(
-    arena: &'arena Arena,
-    parse_tree: ParseTree,
+    arena: &Arena<'arena>,
+    parse_tree: &ParseTree,
     source_origin: Option<String>,
     entry_point: &str,
 ) -> Result<Program<'arena>> {
@@ -153,8 +153,8 @@ pub(super) fn convert<'arena>(
 }
 
 pub(super) fn analyse_module<'arena>(
-    arena: &'arena Arena,
-    parse_tree: ParseTree,
+    arena: &Arena<'arena>,
+    parse_tree: &ParseTree,
     module: &'arena RefCell<Module<'arena>>,
     modules: &mut Vec<&'arena RefCell<Module<'arena>>>,
 ) -> Result<()> {
