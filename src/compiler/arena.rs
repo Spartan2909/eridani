@@ -24,11 +24,13 @@ impl<'arena> Arena<'arena> {
         let managed = unsafe { &mut *self.managed.get() };
         managed.push(NonNull::from(value));
 
+        // SAFETY: There are no active references to `*ptr`.
         unsafe { &mut *ptr }
     }
 
     pub fn collect(&mut self) {
         for &mut value in self.managed.get_mut() {
+            // SAFETY: This is the last pointer to `*value`.
             unsafe {
                 drop(Box::from_raw(value.as_ptr()));
             }

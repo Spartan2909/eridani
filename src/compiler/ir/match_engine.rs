@@ -27,18 +27,16 @@ fn is_superset<T: PartialEq>(superset: &[T], subset: &[T]) -> bool {
     true
 }
 
-pub(super) fn resolve_metapatterns(
-    patterns: &[(Option<&String>, Pattern)],
-) -> Result<Vec<usize>, ()> {
+pub(super) fn resolve_metapatterns(patterns: &[(Option<&str>, Pattern)]) -> Result<Vec<usize>, ()> {
     let mut dependency_indexes = vec![];
-    for (_, pattern) in patterns.iter() {
+    for (_, pattern) in patterns {
         let mut pattern_dependencies = vec![];
 
         let used_names = pattern.names();
         for used_name in used_names {
             if let Some(position) = patterns
                 .iter()
-                .position(|(name, _)| name == &Some(used_name))
+                .position(|(name, _)| name == &Some(&**used_name))
             {
                 pattern_dependencies.push(position);
             }
@@ -115,7 +113,7 @@ pub(super) enum MatchResult {
 }
 
 impl MatchResult {
-    pub(super) fn is_ok(&self) -> bool {
+    pub(super) const fn is_ok(&self) -> bool {
         match self {
             MatchResult::Fail => false,
             MatchResult::Indeterminable | MatchResult::Success(_) => true,
@@ -172,13 +170,4 @@ pub(super) fn partial_match(
     } else {
         MatchResult::Indeterminable
     }
-}
-
-pub(super) fn match_args(
-    patterns: &[(Option<(u16, bool)>, Pattern)],
-    args: &[Value],
-    order: &[usize],
-) -> MatchResult {
-    let args: Vec<_> = args.iter().map(|value| Some(value.to_owned())).collect();
-    partial_match(patterns, &args, order)
 }

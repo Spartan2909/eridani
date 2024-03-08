@@ -1,12 +1,12 @@
 use core::cell::RefCell;
 
-use alloc::collections::BTreeMap;
-
 #[cfg(feature = "std")]
 use std::{
     fs,
     path::{self, PathBuf},
 };
+
+use hashbrown::HashMap;
 
 use crate::{
     common::internal_error,
@@ -37,7 +37,7 @@ pub(super) struct Module<'arena> {
     submodules: Vec<(&'arena RefCell<Module<'arena>>, Visibility)>,
     functions: Vec<&'arena RefCell<Function<'arena>>>,
     function_names: Vec<String>,
-    bindings: BTreeMap<String, Binding<'arena>>,
+    bindings: HashMap<String, Binding<'arena>>,
     supermodule: Option<&'arena RefCell<Module<'arena>>>,
     origin: Option<String>,
 }
@@ -51,7 +51,7 @@ impl<'arena> PartialEq for Module<'arena> {
 impl<'arena> Module<'arena> {
     pub fn new(
         name: &str,
-        bindings: BTreeMap<String, Binding<'arena>>,
+        bindings: HashMap<String, Binding<'arena>>,
         origin: Option<String>,
         supermodule: Option<&'arena RefCell<Module<'arena>>>,
     ) -> Module<'arena> {
@@ -66,15 +66,15 @@ impl<'arena> Module<'arena> {
         }
     }
 
-    pub fn name(&self) -> &String {
+    pub fn name(&self) -> &str {
         &self.name
     }
 
-    pub fn functions(&self) -> &Vec<&'arena RefCell<Function<'arena>>> {
+    pub fn functions(&self) -> &[&'arena RefCell<Function<'arena>>] {
         &self.functions
     }
 
-    pub fn bindings(&self) -> &BTreeMap<String, Binding<'arena>> {
+    pub const fn bindings(&self) -> &HashMap<String, Binding<'arena>> {
         &self.bindings
     }
 
@@ -101,11 +101,11 @@ impl<'arena> Module<'arena> {
         }
     }
 
-    pub fn function_name(&self, index: usize) -> &String {
+    pub fn function_name(&self, index: usize) -> &str {
         &self.function_names[index]
     }
 
-    pub fn function_names(&self) -> &Vec<String> {
+    pub fn function_names(&self) -> &[String] {
         &self.function_names
     }
 
@@ -122,11 +122,11 @@ impl<'arena> Module<'arena> {
         name: &str,
         looking_from_module_tree: bool,
     ) -> Option<Binding<'arena>> {
-        if let Some(module) = self.find_submodule(name, looking_from_module_tree) {
-            Some(Binding::Module(module))
-        } else {
-            self.find_function(name).map(Binding::Function)
-        }
+        self.find_submodule(name, looking_from_module_tree)
+            .map_or_else(
+                || self.find_function(name).map(Binding::Function),
+                |module| Some(Binding::Module(module)),
+            )
     }
 
     fn find_submodule(
@@ -163,17 +163,20 @@ impl<'arena> Module<'arena> {
         if name.kind() == TokenType::Super {
             if let Some(supermodule) = self.supermodule {
                 return Ok((supermodule, true));
-            } else {
-                return Err(Error::new(
-                    name.line(),
-                    "Import",
-                    "",
-                    "'super' used in top-level module",
-                ));
             }
-        } else if let Some(module) = self.find_submodule(name.lexeme(), true) {
+            return Err(Error::new(
+                name.line(),
+                "Import",
+                "",
+                "'super' used in top-level module",
+            ));
+        }
+
+        if let Some(module) = self.find_submodule(name.lexeme(), true) {
             return Ok((module, true));
-        } else if let Some(Binding::Module(module)) = self.bindings.get(name.lexeme()) {
+        }
+
+        if let Some(Binding::Module(module)) = self.bindings.get(name.lexeme()) {
             return Ok((*module, false));
         }
 
@@ -300,7 +303,8 @@ pub(super) fn resolve_import<'arena>(
                     if import_module
                         .borrow()
                         .function_names
-                        .contains(import.name().lexeme())
+                        .iter()
+                        .any(|fun| fun == import.name().lexeme())
                     {
                         Binding::PlaceHolder(import.name().lexeme().to_owned(), import_module)
                     } else {

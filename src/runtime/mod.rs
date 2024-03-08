@@ -124,6 +124,8 @@ impl fmt::Display for ArgsFormatter<'_> {
     }
 }
 
+/// ## Errors
+/// Returns any errors encountered by the program.
 pub fn run(program: Program, args: Vec<Value>) -> Result<Value> {
     let mut vm = vm::Vm::new(program);
     vm.run(args)

@@ -28,14 +28,14 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Collection(errors) => {
-                write!(f, "{:#?}", errors)
+                write!(f, "{errors:#?}")
             }
             Self::Single {
                 line,
                 kind,
                 location,
                 message,
-            } => write!(f, "[line {}] {} Error{}: {}", line, kind, location, message),
+            } => write!(f, "[line {line}] {kind} Error{location}: {message}"),
         }
     }
 }
@@ -67,6 +67,9 @@ pub type Result<T> = result::Result<T, Error>;
 
 use crate::common::bytecode::Program;
 
+/// ## Errors
+/// Returns an error if scanning, parsing, or name resolution fail, or if a runtime error is
+/// detected ahead of time.
 pub fn compile(
     source: String,
     source_origin: Option<String>,

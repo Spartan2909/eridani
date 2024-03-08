@@ -1,6 +1,6 @@
-#[cfg(feature = "std")]
+#[cfg(all(feature = "std", debug_assertions))]
 mod disassembler;
-#[cfg(feature = "std")]
+#[cfg(all(feature = "std", debug_assertions))]
 pub(crate) use disassembler::{disassemble_chunk, disassemble_instruction};
 #[cfg(feature = "serialise")]
 mod serialise;
@@ -12,12 +12,12 @@ use crate::{
 
 use core::mem;
 
-use alloc::collections::BTreeMap;
-
 #[cfg(feature = "serialise")]
 use serde::{Deserialize, Serialize};
 
 use strum::EnumCount;
+
+use hashbrown::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, EnumCount)]
 #[cfg_attr(feature = "serialise", derive(Serialize, Deserialize))]
@@ -176,13 +176,14 @@ impl From<OpCode> for u8 {
 }
 
 fn to_bytes(value: u16) -> (Option<u8>, u8) {
-    if let Ok(value) = u8::try_from(value) {
-        (None, value)
-    } else {
-        let left = ((value & 0xff00) >> 8) as u8;
-        let right = value as u8;
-        (Some(left), right)
-    }
+    u8::try_from(value).map_or_else(
+        |_| {
+            let left = ((value & 0xff00) >> 8) as u8;
+            let right = value as u8;
+            (Some(left), right)
+        },
+        |value| (None, value),
+    )
 }
 
 #[derive(Debug, Clone)]
@@ -237,14 +238,12 @@ impl Chunk {
             self.code.push(left);
             self.code.push(right);
             self.lines.push(line);
-            self.lines.push(line);
-            self.lines.push(line);
         } else {
             self.code.push(op_code.into());
             self.code.push(right);
-            self.lines.push(line);
-            self.lines.push(line);
         }
+        self.lines.push(line);
+        self.lines.push(line);
     }
 
     pub(crate) fn push_constant_instruction(&mut self, constant: Value, line: usize) {
@@ -255,25 +254,23 @@ impl Chunk {
             self.code.push(left);
             self.code.push(right);
             self.lines.push(line);
-            self.lines.push(line);
-            self.lines.push(line);
         } else {
             self.code.push(GenericOpCode::Constant.into());
             self.code.push(right);
-            self.lines.push(line);
-            self.lines.push(line);
         }
+        self.lines.push(line);
+        self.lines.push(line);
     }
 
-    pub(crate) fn code(&self) -> &Vec<u8> {
+    pub(crate) fn code(&self) -> &[u8] {
         &self.code
     }
 
-    pub(crate) fn constants(&self) -> &Vec<Value> {
+    pub(crate) fn constants(&self) -> &[Value] {
         &self.constants
     }
 
-    pub(crate) fn lines(&self) -> &Vec<usize> {
+    pub(crate) fn lines(&self) -> &[usize] {
         &self.lines
     }
 
@@ -300,7 +297,7 @@ pub struct Method {
 }
 
 impl Method {
-    pub(crate) fn new(chunk: Chunk, parameters: Parameters, num_parameters: usize) -> Method {
+    pub(crate) const fn new(chunk: Chunk, parameters: Parameters, num_parameters: usize) -> Method {
         Method {
             chunk,
             parameters,
@@ -308,15 +305,15 @@ impl Method {
         }
     }
 
-    pub(crate) fn chunk(&self) -> &Chunk {
+    pub(crate) const fn chunk(&self) -> &Chunk {
         &self.chunk
     }
 
-    pub(crate) fn parameters(&self) -> &Parameters {
+    pub(crate) const fn parameters(&self) -> &Parameters {
         &self.parameters
     }
 
-    pub(crate) fn num_parameters(&self) -> usize {
+    pub(crate) const fn num_parameters(&self) -> usize {
         self.num_parameters
     }
 }
@@ -326,7 +323,7 @@ impl Method {
 pub(crate) struct Function {
     methods: Vec<Method>,
     #[cfg_attr(feature = "serialise", serde(skip))]
-    memo: BTreeMap<Vec<Value>, Value>,
+    memo: HashMap<Vec<Value>, Value>,
     name: String,
 }
 
@@ -334,17 +331,21 @@ impl Function {
     pub(crate) fn new(methods: Vec<Method>, name: String) -> Function {
         Function {
             methods,
-            memo: BTreeMap::new(),
+            memo: HashMap::new(),
             name,
         }
     }
 
-    pub(crate) fn methods(&self) -> &Vec<Method> {
+    pub(crate) fn methods(&self) -> &[Method] {
         &self.methods
     }
 
-    pub(crate) fn name(&self) -> &String {
+    pub(crate) fn name(&self) -> &str {
         &self.name
+    }
+
+    pub(crate) fn memo(&mut self) -> &mut HashMap<Vec<Value>, Value> {
+        &mut self.memo
     }
 }
 

@@ -15,9 +15,5 @@ split is
 
 main is
     () do
-        let name = "Bob"
-        let hello = lambda (name: String) print(name)
-        hello(name)
-        print(fibonacci in fib(5))
-        print(split("hello again world", " "))
+        print(fibonacci in fib(30))
     end

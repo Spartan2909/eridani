@@ -1,6 +1,9 @@
-use super::*;
+use super::{Type, Value};
 
-use crate::compiler::scanner::{Token, TokenType};
+use crate::{
+    common::internal_error,
+    compiler::scanner::{Token, TokenType},
+};
 
 impl From<&Token> for Value {
     fn from(value: &Token) -> Self {
@@ -30,7 +33,7 @@ impl From<Token> for Value {
 
 impl From<&Token> for Type {
     fn from(value: &Token) -> Self {
-        match value.lexeme().as_str() {
+        match value.lexeme() {
             "Callable" => Type::Callable,
             "Integer" => Type::Integer,
             "List" => Type::List,

@@ -1,8 +1,13 @@
-use crate::{common::internal_error, prelude::*};
+use crate::{
+    common::{bytecode::Method, internal_error},
+    prelude::*,
+};
 
 use core::{
     cmp::Ordering,
-    fmt, mem,
+    fmt,
+    hash::{self, Hash},
+    mem,
     ops::{Add, Div, Mul, Neg, Rem, Sub},
     ptr,
     str::FromStr,
@@ -19,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use strum::EnumCount;
 
 #[cfg(not(feature = "tree_walk"))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serialise", derive(Serialize, Deserialize))]
 pub(crate) enum FunctionKind {
     Eridani,
@@ -27,7 +32,7 @@ pub(crate) enum FunctionKind {
 }
 
 #[cfg(not(feature = "tree_walk"))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serialise", derive(Serialize, Deserialize))]
 pub struct FunctionRef {
     pub(crate) reference: u16,
@@ -37,40 +42,27 @@ pub struct FunctionRef {
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serialise", derive(Serialize, Deserialize))]
 #[non_exhaustive]
-#[cfg(not(feature = "tree_walk"))]
 pub enum Value {
     Function(FunctionRef),
     List(VecDeque<Value>),
     Nothing,
     #[doc(hidden)]
-    Method(Box<crate::common::bytecode::Method>),
+    Method(Box<Method>),
     Number(f64),
     String(String),
 }
 
-#[derive(Debug, Clone)]
-#[cfg(feature = "tree_walk")]
-pub(crate) enum Value {
-    Function(&RefCell<crate::compiler::ir::Function>),
-    List(VecDeque<Value>),
-    Nothing,
-    Method(Box<crate::compiler::ir::Method>),
-    Number(f64),
-    String(String),
-}
-
-impl From<Option<Value>> for Value {
-    fn from(value: Option<Value>) -> Self {
-        match value {
-            Some(value) => value,
-            None => Value::Nothing,
+impl Hash for Value {
+    fn hash<H: hash::Hasher>(&self, state: &mut H) {
+        mem::discriminant(self).hash(state);
+        match self {
+            Value::Function(func_ref) => func_ref.hash(state),
+            Value::List(list) => list.hash(state),
+            Value::Nothing => {}
+            Value::Method(method) => (method.as_ref() as *const Method).hash(state),
+            Value::Number(n) => n.to_bits().hash(state),
+            Value::String(s) => s.hash(state),
         }
-    }
-}
-
-impl From<Option<&Value>> for Value {
-    fn from(value: Option<&Value>) -> Self {
-        value.cloned().into()
     }
 }
 
@@ -249,6 +241,8 @@ impl PartialEq<Value> for &Value {
     }
 }
 
+impl Eq for Value {}
+
 impl PartialOrd for Value {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         match (self, other) {
@@ -290,7 +284,7 @@ impl FromStr for Value {
 }
 
 impl Value {
-    pub fn as_number(&self) -> Option<f64> {
+    pub const fn as_number(&self) -> Option<f64> {
         if let Value::Number(n) = self {
             Some(*n)
         } else {
@@ -299,18 +293,15 @@ impl Value {
     }
 
     pub(crate) fn expect_number(&self) -> f64 {
-        if let Some(n) = self.as_number() {
-            n
-        } else {
-            internal_error!("called 'expect_number' on {:?}", self)
-        }
+        self.as_number()
+            .unwrap_or_else(|| internal_error!("called 'expect_number' on {:?}", self))
     }
 
-    pub fn is_something(&self) -> bool {
+    pub const fn is_something(&self) -> bool {
         !matches!(self, Value::Nothing)
     }
 
-    pub fn as_string(&self) -> Option<&String> {
+    pub const fn as_string(&self) -> Option<&String> {
         if let Value::String(s) = self {
             Some(s)
         } else {
@@ -319,11 +310,8 @@ impl Value {
     }
 
     pub(crate) fn expect_string(&self) -> &String {
-        if let Some(s) = self.as_string() {
-            s
-        } else {
-            internal_error!("called 'expect_string' on {:?}", self)
-        }
+        self.as_string()
+            .unwrap_or_else(|| internal_error!("called 'expect_string' on {:?}", self))
     }
 
     pub(crate) fn into_string(self) -> String {
@@ -334,7 +322,7 @@ impl Value {
         }
     }
 
-    pub fn is_string(&self) -> bool {
+    pub const fn is_string(&self) -> bool {
         matches!(self, Value::String(_))
     }
 }
@@ -353,11 +341,10 @@ impl Type {
     pub(crate) fn is_kind(self, value: &Value) -> bool {
         match (self, value) {
             (Type::Integer, Value::Number(num)) => num.fract() == 0.0,
-            (Type::List, Value::List(_)) => true,
-            (Type::Number, Value::Number(_)) => true,
-            (Type::String, Value::String(_)) => true,
-            (Type::Callable, Value::Function(_)) => true,
-            (Type::Callable, Value::Method(_)) => true,
+            (Type::List, Value::List(_))
+            | (Type::Number, Value::Number(_))
+            | (Type::String, Value::String(_))
+            | (Type::Callable, Value::Function(_) | Value::Method(_)) => true,
             _ => false,
         }
     }
@@ -367,10 +354,9 @@ impl From<u8> for Type {
     fn from(value: u8) -> Self {
         if value as usize >= Type::COUNT {
             internal_error!("cannot interpret '0b{:08b}' as type", value);
-        } else {
-            // SAFETY: guaranteed by condition
-            unsafe { mem::transmute(value) }
         }
+        // SAFETY: guaranteed by condition
+        unsafe { mem::transmute(value) }
     }
 }
 

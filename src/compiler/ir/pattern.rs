@@ -216,6 +216,98 @@ impl From<PatternPrecedence> for i32 {
     }
 }
 
+fn matches_concatenation(
+    value: &Value,
+    items: &[Item],
+    mut variables: Vec<Value>,
+) -> Option<Vec<Value>> {
+    let string = value.as_string()?;
+    let mut match_start = 0;
+    let mut var_waiting = false;
+
+    for item in items {
+        match item {
+            Item::Value(value) => {
+                let current_string = value.expect_string();
+                if let Some(index) = string.get(match_start..).unwrap_or("").find(current_string) {
+                    if var_waiting {
+                        variables.push(Value::String(string[match_start..index].to_owned()));
+                        var_waiting = false;
+                    } else if index != match_start {
+                        return None;
+                    }
+
+                    match_start = index + current_string.len();
+                } else {
+                    return None;
+                }
+            }
+            Item::Wildcard(var) => {
+                if let Some(value) = variables.get(var.reference() as usize) {
+                    let current_string = value.expect_string();
+                    if let Some(index) =
+                        string.get(match_start..).unwrap_or("").find(current_string)
+                    {
+                        let match_start_tmp = index + current_string.len();
+                        variables.push(Value::String(string[match_start..index].to_owned()));
+                        match_start = match_start_tmp;
+                        var_waiting = false;
+                    } else {
+                        return None;
+                    }
+                } else if var_waiting {
+                    internal_error!("sequential wildcards")
+                } else {
+                    var_waiting = true;
+                }
+            }
+        }
+    }
+
+    if var_waiting {
+        variables.push(Value::String(
+            string.get(match_start..).unwrap_or("").to_owned(),
+        ));
+    } else if match_start < string.len() {
+        return None;
+    }
+
+    Some(variables)
+}
+
+fn matches_operator_comparison(
+    value: &Value,
+    mut operator_chain: Option<&OperatorChain>,
+    comparison: Comparision,
+    rhs: &Item,
+    variables: Vec<Value>,
+) -> Option<Vec<Value>> {
+    let mut value = value.to_owned();
+
+    while let Some(operator) = operator_chain {
+        let mid = operator.rhs.resolve(&variables)?.clone();
+
+        value = match operator.operator {
+            ArithOp::Add => value + mid,
+            ArithOp::Sub => value - mid,
+            ArithOp::Mul => value * mid,
+            ArithOp::Div => value / mid,
+            ArithOp::Mod => value % mid,
+        }?;
+
+        operator_chain = operator.next.as_deref();
+    }
+
+    let rhs = rhs.resolve(&variables)?;
+    let matches = comparison.compare(&value, rhs);
+
+    if matches {
+        Some(variables)
+    } else {
+        None
+    }
+}
+
 impl Pattern {
     pub fn matches(&self, value: &Value, variables: Vec<Value>) -> Option<Vec<Value>> {
         match self {
@@ -227,77 +319,14 @@ impl Pattern {
                 if *operator == LogOp::Or {
                     let left = left.matches(value, variables.clone());
                     let right = right.matches(value, variables);
-                    if let Some(variables) = left {
-                        Some(variables)
-                    } else {
-                        right
-                    }
+                    left.map_or(right, Some)
                 } else {
                     let variables = left.matches(value, variables)?;
                     let variables = right.matches(value, variables)?;
                     Some(variables)
                 }
             }
-            Pattern::Concatenation(items) => {
-                let mut variables = variables;
-
-                let string = value.as_string()?;
-                let mut match_start = 0;
-                let mut var_waiting = false;
-
-                for item in items {
-                    match item {
-                        Item::Value(value) => {
-                            let current_string = value.expect_string();
-                            if let Some(index) =
-                                string.get(match_start..).unwrap_or("").find(current_string)
-                            {
-                                if var_waiting {
-                                    variables
-                                        .push(Value::String(string[match_start..index].to_owned()));
-                                    var_waiting = false;
-                                } else if index != match_start {
-                                    return None;
-                                }
-
-                                match_start = index + current_string.len();
-                            } else {
-                                return None;
-                            }
-                        }
-                        Item::Wildcard(var) => {
-                            if let Some(value) = variables.get(var.reference() as usize) {
-                                let current_string = value.expect_string();
-                                if let Some(index) =
-                                    string.get(match_start..).unwrap_or("").find(current_string)
-                                {
-                                    let match_start_tmp = index + current_string.len();
-                                    variables
-                                        .push(Value::String(string[match_start..index].to_owned()));
-                                    match_start = match_start_tmp;
-                                    var_waiting = false;
-                                } else {
-                                    return None;
-                                }
-                            } else if var_waiting {
-                                internal_error!("sequential wildcards")
-                            } else {
-                                var_waiting = true;
-                            }
-                        }
-                    }
-                }
-
-                if var_waiting {
-                    variables.push(Value::String(
-                        string.get(match_start..).unwrap_or("").to_owned(),
-                    ));
-                } else if match_start < string.len() {
-                    return None;
-                }
-
-                Some(variables)
-            }
+            Pattern::Concatenation(items) => matches_concatenation(value, items, variables),
             Pattern::List { left, right } => {
                 if let Value::List(list) = value {
                     let variables = left.matches(&list[0], variables)?;
@@ -322,36 +351,13 @@ impl Pattern {
                 operator_chain,
                 comparison,
                 rhs,
-            } => {
-                let mut operator_chain = operator_chain.as_ref();
-                let mut value = value.to_owned();
-
-                while let Some(operator) = operator_chain {
-                    let mid = operator.rhs.resolve(&variables)?.clone();
-
-                    value = match operator.operator {
-                        ArithOp::Add => value + mid,
-                        ArithOp::Sub => value - mid,
-                        ArithOp::Mul => value * mid,
-                        ArithOp::Div => value / mid,
-                        ArithOp::Mod => value % mid,
-                    }?;
-
-                    operator_chain = match &operator.next {
-                        Some(next) => Some(next),
-                        None => None,
-                    }
-                }
-
-                let rhs = rhs.resolve(&variables)?;
-                let matches = comparison.compare(&value, rhs);
-
-                if matches {
-                    Some(variables)
-                } else {
-                    None
-                }
-            }
+            } => matches_operator_comparison(
+                value,
+                operator_chain.as_ref(),
+                *comparison,
+                rhs,
+                variables,
+            ),
             Pattern::Range {
                 lower,
                 upper,
@@ -408,7 +414,7 @@ impl Pattern {
 
     pub(super) fn bind(&mut self, environment: &mut Environment) {
         match self {
-            Pattern::Binary { left, right, .. } => {
+            Pattern::Binary { left, right, .. } | Pattern::List { left, right } => {
                 left.bind(environment);
                 right.bind(environment);
             }
@@ -420,11 +426,6 @@ impl Pattern {
                     }
                 }
             }
-            Pattern::List { left, right } => {
-                left.bind(environment);
-                right.bind(environment);
-            }
-            Pattern::Literal(_) => {}
             Pattern::OperatorComparison {
                 operator_chain,
                 rhs,
@@ -439,8 +440,6 @@ impl Pattern {
                     *rhs = Item::Wildcard(Variable::Reference { reference, pre_set });
                 }
             }
-            Pattern::Range { .. } => {}
-            Pattern::Type(_) => {}
             Pattern::Unary { right, .. } => right.bind(environment),
             Pattern::Wildcard(binding) => {
                 if let Some(Variable::Name(name)) = binding {
@@ -448,12 +447,13 @@ impl Pattern {
                     *self = Pattern::Wildcard(Some(Variable::Reference { reference, pre_set }));
                 }
             }
+            Pattern::Literal(_) | Pattern::Range { .. } | Pattern::Type(_) => {}
         }
     }
 
     pub fn references(&self) -> Vec<u16> {
         match self {
-            Pattern::Binary { left, right, .. } => {
+            Pattern::Binary { left, right, .. } | Pattern::List { left, right } => {
                 let mut references = left.references();
                 references.append(&mut right.references());
                 references
@@ -468,11 +468,6 @@ impl Pattern {
                     }
                 })
                 .collect(),
-            Pattern::List { left, right } => {
-                let mut references = left.references();
-                references.append(&mut right.references());
-                references
-            }
             Pattern::OperatorComparison {
                 operator_chain,
                 rhs,
@@ -488,20 +483,16 @@ impl Pattern {
                 references
             }
             Pattern::Unary { right, .. } => right.references(),
-            Pattern::Wildcard(var) => {
-                if let Some(var) = var {
-                    vec![var.reference()]
-                } else {
-                    vec![]
-                }
-            }
+            Pattern::Wildcard(var) => var
+                .as_ref()
+                .map_or_else(Vec::new, |var| vec![var.reference()]),
             Pattern::Literal(_) | Pattern::Range { .. } | Pattern::Type(_) => vec![],
         }
     }
 
     pub fn names(&self) -> Vec<&String> {
         match self {
-            Pattern::Binary { left, right, .. } => {
+            Pattern::Binary { left, right, .. } | Pattern::List { left, right } => {
                 let mut names = left.names();
                 names.append(&mut right.names());
                 names
@@ -516,11 +507,6 @@ impl Pattern {
                     }
                 })
                 .collect(),
-            Pattern::List { left, right } => {
-                let mut names = left.names();
-                names.append(&mut right.names());
-                names
-            }
             Pattern::OperatorComparison {
                 operator_chain,
                 rhs,
@@ -590,7 +576,7 @@ impl Pattern {
 
     pub fn is_literal(&self, bindings: &[Option<u16>]) -> bool {
         if let Pattern::Wildcard(name) = self {
-            bindings.contains(&name.as_ref().map(|var| var.reference()))
+            bindings.contains(&name.as_ref().map(Variable::reference))
         } else {
             matches!(self, Pattern::Literal(_))
         }
@@ -611,6 +597,34 @@ impl From<Token> for Item {
     fn from(value: Token) -> Self {
         (&value).into()
     }
+}
+
+fn convert_concatenation(start: &Token, operator_chain: &parser::OperatorChain) -> Pattern {
+    let mut items = match start.kind() {
+        TokenType::Identifier => {
+            vec![Item::Wildcard(Variable::Name(start.lexeme().to_owned()))]
+        }
+        TokenType::String => vec![Item::Value(start.into())],
+        _ => internal_error!("parsed {:?} as start of concatenation", start),
+    };
+
+    let mut chain = Some(operator_chain);
+
+    while let Some(operator_chain) = chain {
+        let item = match operator_chain.mid().kind() {
+            TokenType::Identifier => {
+                Item::Wildcard(Variable::Name(operator_chain.mid().lexeme().to_owned()))
+            }
+            TokenType::String => Item::Value(operator_chain.mid().into()),
+            _ => internal_error!("parsed {:?} as concatenation item", operator_chain.mid()),
+        };
+
+        items.push(item);
+
+        chain = operator_chain.next();
+    }
+
+    Pattern::Concatenation(items)
 }
 
 impl From<&parser::Pattern> for Pattern {
@@ -638,36 +652,7 @@ impl From<&parser::Pattern> for Pattern {
             ParserPattern::Concatenation {
                 start,
                 operator_chain,
-            } => {
-                let mut items = match start.kind() {
-                    TokenType::Identifier => {
-                        vec![Item::Wildcard(Variable::Name(start.lexeme().to_owned()))]
-                    }
-                    TokenType::String => vec![Item::Value(start.into())],
-                    _ => internal_error!("parsed {:?} as start of concatenation", start),
-                };
-
-                let mut chain = Some(operator_chain);
-
-                while let Some(operator_chain) = chain {
-                    let item = match operator_chain.mid().kind() {
-                        TokenType::Identifier => {
-                            Item::Wildcard(Variable::Name(operator_chain.mid().lexeme().to_owned()))
-                        }
-                        TokenType::String => Item::Value(operator_chain.mid().into()),
-                        _ => internal_error!(
-                            "parsed {:?} as concatenation item",
-                            operator_chain.mid()
-                        ),
-                    };
-
-                    items.push(item);
-
-                    chain = operator_chain.next();
-                }
-
-                Pattern::Concatenation(items)
-            }
+            } => convert_concatenation(start, operator_chain),
             ParserPattern::List { left, right } => Pattern::List {
                 left: Box::new((&**left).into()),
                 right: Box::new((&**right).into()),
@@ -678,7 +663,7 @@ impl From<&parser::Pattern> for Pattern {
                 comparison,
                 rhs,
             } => {
-                let operator_chain = operator_chain.as_ref().map(|chain| chain.into());
+                let operator_chain = operator_chain.as_ref().map(Into::into);
                 let comparison = match comparison.kind() {
                     TokenType::EqualEqual => Comparision::Equal,
                     TokenType::BangEqual => Comparision::NotEqual,

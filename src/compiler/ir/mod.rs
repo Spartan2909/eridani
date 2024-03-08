@@ -5,6 +5,7 @@ mod modules;
 mod optimiser;
 pub(super) mod pattern;
 
+use alloc::rc::Rc;
 use modules::Module;
 
 use crate::{
@@ -18,11 +19,11 @@ use crate::{
     prelude::*,
 };
 
-use core::{cell::RefCell, cmp::Ordering, fmt, ptr::NonNull};
-
-use alloc::collections::BTreeMap;
+use core::{cell::RefCell, cmp::Ordering, fmt};
 
 use bimap::BiMap;
+
+use hashbrown::HashMap;
 
 pub(crate) struct Program<'arena> {
     entry_point: &'arena RefCell<Function<'arena>>,
@@ -40,11 +41,11 @@ impl<'arena> Program<'arena> {
         }
     }
 
-    pub(super) fn entry_point(&self) -> &'arena RefCell<Function<'arena>> {
+    pub(super) const fn entry_point(&self) -> &'arena RefCell<Function<'arena>> {
         self.entry_point
     }
 
-    pub(super) fn functions(&self) -> &Vec<&'arena RefCell<Function<'arena>>> {
+    pub(super) fn functions(&self) -> &[&'arena RefCell<Function<'arena>>] {
         &self.functions
     }
 }
@@ -125,10 +126,9 @@ impl<'arena> Ord for Function<'arena> {
 }
 
 impl<'arena> Function<'arena> {
-    pub(crate) fn name(&self) -> &String {
+    pub(crate) fn name(&self) -> &str {
         match self {
-            Function::Eridani { name, .. } => name,
-            Function::Rust { name, .. } => name,
+            Function::Eridani { name, .. } | Function::Rust { name, .. } => name,
         }
     }
 
@@ -142,7 +142,7 @@ impl<'arena> Function<'arena> {
         Ok(())
     }
 
-    pub(super) fn methods(&self) -> Option<&Vec<&'arena RefCell<Method<'arena>>>> {
+    pub(super) fn methods(&self) -> Option<&[&'arena RefCell<Method<'arena>>]> {
         if let Function::Eridani { methods, .. } = self {
             Some(methods)
         } else {
@@ -170,7 +170,7 @@ impl<'arena> Function<'arena> {
         }
     }
 
-    fn kind(&self) -> FunctionKind {
+    const fn kind(&self) -> FunctionKind {
         match self {
             Function::Eridani { .. } => FunctionKind::Eridani,
             Function::Rust { .. } => FunctionKind::Rust,
@@ -183,7 +183,7 @@ impl<'arena> Function<'arena> {
         }
     }
 
-    fn is_native(&self) -> bool {
+    const fn is_native(&self) -> bool {
         matches!(self, Function::Rust { .. })
     }
 }
@@ -193,20 +193,20 @@ pub(crate) struct Method<'arena> {
     args: Vec<(Option<(u16, bool)>, Pattern)>,
     arg_order: Vec<usize>,
     body: Expr<'arena>,
-    environment: Box<Environment>,
+    environment: Rc<RefCell<Environment>>,
     precedence: i32,
 }
 
 impl<'arena> Method<'arena> {
-    pub(super) fn args(&self) -> &Vec<(Option<(u16, bool)>, Pattern)> {
+    pub(super) fn args(&self) -> &[(Option<(u16, bool)>, Pattern)] {
         &self.args
     }
 
-    pub(super) fn body(&self) -> &Expr<'arena> {
+    pub(super) const fn body(&self) -> &Expr<'arena> {
         &self.body
     }
 
-    pub(super) fn arg_order(&self) -> &Vec<usize> {
+    pub(super) fn arg_order(&self) -> &[usize] {
         &self.arg_order
     }
 }
@@ -272,62 +272,56 @@ impl fmt::Display for UnOp {
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct Environment {
     variables: BiMap<String, u16>,
-    enclosing: Option<NonNull<Environment>>,
+    enclosing: Option<Rc<RefCell<Environment>>>,
 }
 
 impl Environment {
-    /// # Safety
-    /// The enclosing environment must remain in the same place in memory
-    /// while this environment exists.
-    pub unsafe fn new(enclosing: &Environment) -> Box<Environment> {
-        Box::new(Self {
+    pub fn new(enclosing: Rc<RefCell<Environment>>) -> Environment {
+        Self {
             variables: BiMap::new(),
-            enclosing: Some(NonNull::from(enclosing)),
-        })
+            enclosing: Some(enclosing),
+        }
     }
 
-    pub fn new_toplevel() -> Box<Environment> {
-        Box::new(Self {
+    pub fn new_toplevel() -> Environment {
+        Self {
             variables: BiMap::new(),
             enclosing: None,
-        })
+        }
     }
 
     fn new_reference(&self) -> u16 {
-        if let Some(reference) = self.variables.right_values().max() {
-            *reference + 1
-        } else if let Some(enclosing) = self.enclosing {
-            // SAFETY: `self.enclosing` is guaranteed to be valid
-            // and we never mutate the enclosing environment
-            let enclosing = unsafe { enclosing.as_ref() };
-            enclosing.new_reference()
-        } else {
-            0
-        }
+        self.variables.right_values().max().map_or_else(
+            || {
+                self.enclosing
+                    .as_deref()
+                    .map_or(0, |enclosing| enclosing.borrow().new_reference())
+            },
+            |reference| *reference + 1,
+        )
     }
 
     #[must_use]
     pub fn get_or_add(&mut self, name: String) -> (u16, bool) {
-        if let Some(reference) = self.get(&name) {
-            (reference, true)
-        } else {
-            let reference = self.new_reference();
-            self.variables.insert(name, reference);
-            (reference, false)
-        }
+        self.get(&name).map_or_else(
+            || {
+                let reference = self.new_reference();
+                self.variables.insert(name, reference);
+                (reference, false)
+            },
+            |reference| (reference, true),
+        )
     }
 
     pub fn get(&self, name: &str) -> Option<u16> {
-        if let Some(reference) = self.variables.get_by_left(name) {
-            Some(*reference)
-        } else if let Some(enclosing) = self.enclosing {
-            // SAFETY: `self.enclosing` is guaranteed to be valid
-            // and we never mutate the enclosing environment
-            let enclosing = unsafe { enclosing.as_ref() };
-            enclosing.get(name)
-        } else {
-            None
-        }
+        self.variables.get_by_left(name).map_or_else(
+            || {
+                self.enclosing
+                    .as_deref()
+                    .and_then(|enclosing| enclosing.borrow().get(name))
+            },
+            |reference| Some(*reference),
+        )
     }
 }
 
@@ -347,11 +341,11 @@ pub(super) struct ListExpr<'arena> {
 }
 
 impl<'arena> ListExpr<'arena> {
-    pub(super) fn expr(&self) -> &Expr<'arena> {
+    pub(super) const fn expr(&self) -> &Expr<'arena> {
         &self.expr
     }
 
-    pub(super) fn spread(&self) -> bool {
+    pub(super) const fn spread(&self) -> bool {
         self.spread
     }
 }
@@ -366,7 +360,7 @@ pub(super) enum Expr<'arena> {
     Block {
         body: Vec<Self>,
         line: usize,
-        environment: Box<Environment>,
+        environment: Rc<RefCell<Environment>>,
     },
     Call {
         callee: Box<Self>,
@@ -423,7 +417,6 @@ impl<'arena> Expr<'arena> {
                     expr.expr.resolve_placeholders()?;
                 }
             }
-            Self::Function { .. } => {}
             Self::Grouping(expr) => expr.resolve_placeholders()?,
             Self::Let { value, .. } => value.resolve_placeholders()?,
             Self::List { expressions, .. } => {
@@ -432,32 +425,34 @@ impl<'arena> Expr<'arena> {
                 }
             }
             Self::ListItem(item) => item.expr.resolve_placeholders()?,
-            Self::Literal { .. } => {}
             Self::Method(method) => method.body.resolve_placeholders()?,
             Self::PlaceHolder(placeholder, containing_module) => {
                 let containing_module = containing_module.0;
-                let function = if let Some(function) = containing_module
+                let function = containing_module
                     .borrow()
                     .find_function(placeholder.name().lexeme())
-                {
-                    function
-                } else if let Some(binding) = containing_module
-                    .borrow()
-                    .bindings()
-                    .get(placeholder.name().lexeme())
-                {
-                    if let Binding::Function(f) = binding {
-                        *f
-                    } else {
-                        internal_error!("placeholder pointing to module")
-                    }
-                } else {
-                    internal_error!(
-                        "dangling placeholder {:?} in module '{}'",
-                        placeholder,
-                        containing_module.borrow().name()
-                    )
-                };
+                    .map_or_else(
+                        || {
+                            if let Some(binding) = containing_module
+                                .borrow()
+                                .bindings()
+                                .get(placeholder.name().lexeme())
+                            {
+                                if let Binding::Function(f) = binding {
+                                    *f
+                                } else {
+                                    internal_error!("placeholder pointing to module")
+                                }
+                            } else {
+                                internal_error!(
+                                    "dangling placeholder {:?} in module '{}'",
+                                    placeholder,
+                                    containing_module.borrow().name()
+                                )
+                            }
+                        },
+                        |function| function,
+                    );
 
                 *self = Self::Function {
                     function,
@@ -465,7 +460,7 @@ impl<'arena> Expr<'arena> {
                 };
             }
             Self::Unary { right, .. } => right.resolve_placeholders()?,
-            Self::Variable { .. } => {}
+            Self::Function { .. } | Self::Literal { .. } | Self::Variable { .. } => {}
         }
 
         Ok(())
@@ -505,41 +500,29 @@ impl<'arena> Expr<'arena> {
                 .flat_map(|expr| expr.expr.calls())
                 .collect(),
             Self::ListItem(expr) => expr.expr.calls(),
-            Self::Literal { .. } => vec![],
+            Self::Literal { .. } | Self::Variable { .. } => vec![],
             Self::Method(method) => method.body.calls(),
             Self::PlaceHolder(_, _) => internal_error!("called 'calls' on placeholder"),
             Self::Unary { right, .. } => right.calls(),
-            Self::Variable { .. } => vec![],
         }
     }
 
     pub(crate) fn line(&self) -> usize {
         match self {
-            Expr::Binary { right, .. } => right.line(),
-            Expr::Block { body, line, .. } => {
-                if let Some(expr) = body.last() {
-                    expr.line()
-                } else {
-                    *line
-                }
-            }
-            Expr::Call { line, .. } => *line,
-            Expr::Function { line, .. } => *line,
+            Expr::Binary { right, .. } | Expr::Unary { right, .. } => right.line(),
+            Expr::Block { body, line, .. } => body.last().map_or(*line, Expr::line),
+            Expr::Call { line, .. }
+            | Expr::Function { line, .. }
+            | Expr::Literal { line, .. }
+            | Expr::Variable { line, .. } => *line,
             Expr::Grouping(expr) => expr.line(),
             Expr::Let { value, .. } => value.line(),
             Expr::List { expressions, line } => {
-                if let Some(expr) = expressions.last() {
-                    expr.expr.line()
-                } else {
-                    *line
-                }
+                expressions.last().map_or(*line, |expr| expr.expr.line())
             }
             Expr::ListItem(item) => item.expr.line(),
-            Expr::Literal { line, .. } => *line,
             Expr::Method(method) => method.body.line(),
             Expr::PlaceHolder(placeholder, _) => placeholder.line(),
-            Expr::Unary { right, .. } => right.line(),
-            Expr::Variable { line, .. } => *line,
         }
     }
 }
@@ -579,7 +562,7 @@ impl<'arena> fmt::Debug for Expr<'arena> {
                 .finish(),
             Expr::Function { function, line } => f
                 .debug_struct("Expr::Function")
-                .field("function", function.borrow().name())
+                .field("function", &function.borrow().name())
                 .field("line", line)
                 .field("kind", &function.borrow().kind())
                 .finish(),
@@ -631,16 +614,19 @@ impl<'arena> Binding<'arena> {
     fn name(&self) -> String {
         match self {
             Binding::Function(f) => f.borrow().name().to_string(),
-            Binding::Module(m) => m.borrow().name().clone(),
+            Binding::Module(m) => m.borrow().name().to_string(),
             Binding::PlaceHolder(name, _) => name.clone(),
         }
     }
 }
 
 fn clone_bindings<'arena>(
-    bindings: &BTreeMap<String, Binding<'arena>>,
-) -> BTreeMap<String, Binding<'arena>> {
-    BTreeMap::from_iter(bindings.iter().map(|(a, b)| (a.clone(), b.clone())))
+    bindings: &HashMap<String, Binding<'arena>>,
+) -> HashMap<String, Binding<'arena>> {
+    bindings
+        .iter()
+        .map(|(a, b)| (a.clone(), b.clone()))
+        .collect()
 }
 
 #[cfg(test)]
@@ -666,7 +652,7 @@ pub(super) fn analyse<'arena>(
     source_origin: Option<String>,
     entry_point: &str,
 ) -> Result<Program<'arena>> {
-    let converted = converter::convert(arena, &parse_tree, source_origin, entry_point)?;
+    let converted = converter::convert(arena, parse_tree, source_origin, entry_point)?;
     let checked = checker::check_before_optimisation(converted)?;
     let optimised = optimiser::optimise(checked)?;
     Ok(optimised)

@@ -7,50 +7,56 @@ use crate::{
     prelude::*,
 };
 
+use super::match_engine::MatchResult;
+
 fn fold_constants(body: &mut Expr) -> Result<()> {
-    for _ in 0..3 {
-        match body {
-            Expr::Binary {
-                left,
-                operator,
-                right,
-            } => match (left.as_ref(), right.as_ref()) {
-                (Expr::Literal { value: left, .. }, Expr::Literal { value: right, .. }) => {
-                    if let Some(value) = operator.operate(left, right) {
-                        *body = Expr::Literal {
-                            value,
-                            line: body.line(),
-                        };
-                    } else {
-                        let message = format!(
-                            "Operation '{operator}' not permitted between '{left}' and '{right}'"
-                        );
-                        return Err(Error::new(body.line(), "Arithmetic", "", &message));
-                    }
-                }
-                _ => {}
-            },
-            Expr::Unary { operator, right } => {
-                if let Expr::Literal { value, .. } = right.as_ref() {
-                    if let Some(value) = operator.operate(value) {
-                        *body = Expr::Literal {
-                            value,
-                            line: body.line(),
-                        };
-                    } else {
-                        let message =
-                            format!("Operator '{}' not permitted on '{}'", operator, value);
-                        return Err(Error::new(body.line(), "Type", "", &message));
-                    }
+    match body {
+        Expr::Binary {
+            left,
+            operator,
+            right,
+        } => {
+            fold_constants(left)?;
+            fold_constants(right)?;
+
+            if let (Expr::Literal { value: left, .. }, Expr::Literal { value: right, .. }) =
+                (&**left, &**right)
+            {
+                if let Some(value) = operator.operate(left, right) {
+                    *body = Expr::Literal {
+                        value,
+                        line: body.line(),
+                    };
+                } else {
+                    let message = format!(
+                        "Operation '{operator}' not permitted between '{left}' and '{right}'"
+                    );
+                    return Err(Error::new(body.line(), "Arithmetic", "", &message));
                 }
             }
-            _ => {}
         }
+        Expr::Unary { operator, right } => {
+            fold_constants(right)?;
+
+            if let Expr::Literal { value, .. } = &**right {
+                if let Some(value) = operator.operate(value) {
+                    *body = Expr::Literal {
+                        value,
+                        line: body.line(),
+                    };
+                } else {
+                    let message = format!("Operator '{operator}' not permitted on '{value}'");
+                    return Err(Error::new(body.line(), "Type", "", &message));
+                }
+            }
+        }
+        _ => {}
     }
 
     Ok(())
 }
 
+#[allow(clippy::single_match)]
 fn identify_methods(body: &mut Expr) -> Result<()> {
     match body {
         Expr::Call {
@@ -66,18 +72,29 @@ fn identify_methods(body: &mut Expr) -> Result<()> {
                     }
                 })
                 .collect();
-            match callee.as_ref() {
+            match &**callee {
                 Expr::Function { function, .. } if function.borrow().methods().is_some() => {
-                    let mut matches = vec![];
-                    for method in function.borrow().methods().unwrap() {
-                        if partial_match(
+                    let mut successes = vec![];
+                    let mut indeterminable = vec![];
+                    for &method in function.borrow().methods().unwrap() {
+                        let match_result = partial_match(
                             method.borrow().args(),
                             &arguments,
                             method.borrow().arg_order(),
-                        )
-                        .is_ok()
-                        {
-                            matches.push(method);
+                        );
+                        match match_result {
+                            MatchResult::Success(_) => successes.push(method),
+                            MatchResult::Indeterminable => indeterminable.push(method),
+                            MatchResult::Fail => {}
+                        }
+                    }
+                    if let Some(method) = successes.pop() {
+                        if successes.is_empty() {
+                            *callee = Box::new(Expr::Method(Box::new(method.borrow().clone())));
+                        }
+                    } else if let Some(method) = indeterminable.pop() {
+                        if indeterminable.is_empty() {
+                            *callee = Box::new(Expr::Method(Box::new(method.borrow().clone())));
                         }
                     }
                 }

@@ -103,9 +103,7 @@ fn wide_constant_instruction(name: &str, chunk: &Chunk, offset: usize) -> usize 
     let low = chunk.code[offset + 2];
     let constant = (u16::from(high) << 8) | u16::from(low);
     println!(
-        "{:<16} {:>5} '{}'",
-        name,
-        constant,
+        "{name:<16} {constant:>5} '{}'",
         chunk.constants[usize::from(constant)]
     );
 
@@ -114,7 +112,7 @@ fn wide_constant_instruction(name: &str, chunk: &Chunk, offset: usize) -> usize 
 
 fn byte_instruction(name: &str, chunk: &Chunk, offset: usize) -> usize {
     let slot = chunk.code[offset + 1];
-    println!("{:<16} {:>5}", name, slot);
+    println!("{name:<16} {slot:>5}");
 
     offset + 2
 }
@@ -123,14 +121,14 @@ fn wide_byte_instruction(name: &str, chunk: &Chunk, offset: usize) -> usize {
     let high = chunk.code[offset + 1];
     let low = chunk.code[offset + 2];
     let slot = (u16::from(high) << 8) | u16::from(low);
-    println!("{:<16} {:>5}", name, slot);
+    println!("{name:<16} {slot:>5}");
 
     offset + 3
 }
 
 fn type_instruction(name: &str, chunk: &Chunk, offset: usize) -> usize {
     let kind = chunk.code[offset + 1];
-    println!("{:<16} {:>5} '{:?}'", name, kind, Type::from(kind));
+    println!("{name:<16} {kind:>5} '{:?}'", Type::from(kind));
 
     offset + 2
 }

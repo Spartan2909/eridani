@@ -10,13 +10,13 @@ pub struct TargetFeatures(u8);
 pub struct RuntimeFeatures(u8);
 
 #[cfg(feature = "target_std")]
-const TARGET_STD: u8 = 0b00000001;
+const TARGET_STD: u8 = 0b0000_0001;
 
 #[cfg(not(feature = "target_std"))]
 const TARGET_STD: u8 = 0;
 
 #[cfg(feature = "target_web")]
-const TARGET_WEB: u8 = 0b00000010;
+const TARGET_WEB: u8 = 0b0000_0010;
 
 #[cfg(not(feature = "target_web"))]
 const TARGET_WEB: u8 = 0;
@@ -24,20 +24,19 @@ const TARGET_WEB: u8 = 0;
 pub const TARGET_FEATURES: TargetFeatures = TargetFeatures(TARGET_STD | TARGET_WEB);
 
 #[cfg(feature = "std")]
-const RUNTIME_STD: u8 = 0b00000001;
+const RUNTIME_STD: u8 = 0b0000_0001;
 
 #[cfg(not(feature = "std"))]
 const RUNTIME_STD: u8 = 0;
 
 #[cfg(feature = "web")]
-const RUNTIME_WEB: u8 = 0b00000010;
+const RUNTIME_WEB: u8 = 0b0000_0010;
 
 #[cfg(not(feature = "web"))]
 const RUNTIME_WEB: u8 = 0;
 
 pub const RUNTIME_FEATURES: RuntimeFeatures = RuntimeFeatures(RUNTIME_STD | RUNTIME_WEB);
 
-#[inline(always)]
 pub const fn features_compatible(
     target_features: TargetFeatures,
     runtime_features: RuntimeFeatures,

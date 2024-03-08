@@ -4,22 +4,22 @@ use crate::{
 };
 
 fn get(args: &[Value], index: usize) -> Result<Value, ArgumentError> {
-    if let Some(value) = args.get(index) {
-        Ok(value.clone())
-    } else {
-        let description = format!("No item at index '{index}'");
-        Err(ArgumentError::new(&description))
-    }
+    args.get(index).map_or_else(
+        || {
+            let description = format!("No item at index '{index}'");
+            Err(ArgumentError::new(&description))
+        },
+        |value| Ok(value.clone()),
+    )
 }
 
 fn get_string(args: &[Value], index: usize) -> Result<String, ArgumentError> {
     let value = get(args, index)?;
-    match value {
-        Value::String(s) => Ok(s),
-        _ => {
-            let description = format!("Expected a string, found '{value}'");
-            Err(ArgumentError::new(&description))
-        }
+    if let Value::String(s) = value {
+        Ok(s)
+    } else {
+        let description = format!("Expected a string, found '{value}'");
+        Err(ArgumentError::new(&description))
     }
 }
 
@@ -45,7 +45,7 @@ mod basic {
         };
         let index = index.floor() as usize;
 
-        Ok(list.get(index).into())
+        Ok(list.get(index).map_or(Value::Nothing, Clone::clone))
     }
 
     pub(crate) fn number(args: &[Value]) -> Result<Value, ArgumentError> {
@@ -97,7 +97,7 @@ mod feature_std {
         if io::stdin().read_line(&mut buf).is_ok() {
             let input = buf
                 .strip_suffix("\r\n")
-                .or(buf.strip_suffix('\n'))
+                .or_else(|| buf.strip_suffix('\n'))
                 .unwrap_or(&buf)
                 .to_string();
             Ok(Value::String(input))

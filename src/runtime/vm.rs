@@ -1,4 +1,4 @@
-#[cfg(feature = "std")]
+#[cfg(all(feature = "std", debug_assertions))]
 use crate::common::bytecode::{disassemble_chunk, disassemble_instruction};
 use crate::{
     common::{
@@ -165,79 +165,147 @@ impl Vm {
             GenericOpCode::Constant => {
                 let byte = self.read_byte();
                 self.stack
-                    .push(self.current_chunk().constants()[usize::from(byte)].to_owned());
+                    .push(self.current_chunk().constants()[usize::from(byte)].clone());
             }
             GenericOpCode::WideConstant => {
                 let bytes = self.read_bytes();
                 self.stack
-                    .push(self.current_chunk().constants()[usize::from(bytes)].to_owned());
+                    .push(self.current_chunk().constants()[usize::from(bytes)].clone());
             }
             GenericOpCode::Nothing => self.stack.push(Value::Nothing),
             GenericOpCode::Add => {
                 let value1 = self.pop_stack();
                 let value2 = self.pop_stack();
-                let result = (&value2 + &value1).ok_or(self.error(
-                    "Arithmetic".to_string(),
-                    format!("Cannot add {value2} to {value1}"),
-                ))?;
+                let result = (&value2 + &value1).ok_or_else(|| {
+                    self.error(
+                        "Arithmetic".to_string(),
+                        format!("Cannot add {value2} to {value1}"),
+                    )
+                })?;
                 self.stack.push(result);
             }
             GenericOpCode::Subtract => {
                 let value1 = self.pop_stack();
                 let value2 = self.pop_stack();
-                let result = (&value2 - &value1).ok_or(self.error(
-                    "Arithmetic".to_string(),
-                    format!("Cannot subtract {value2} from {value1}"),
-                ))?;
+                let result = (&value2 - &value1).ok_or_else(|| {
+                    self.error(
+                        "Arithmetic".to_string(),
+                        format!("Cannot subtract {value2} from {value1}"),
+                    )
+                })?;
                 self.stack.push(result);
             }
             GenericOpCode::Multiply => {
                 let value1 = self.pop_stack();
                 let value2 = self.pop_stack();
-                let result = (&value2 * &value1).ok_or(self.error(
-                    "Arithmetic".to_string(),
-                    format!("Cannot multiply {value2} by {value1}"),
-                ))?;
+                let result = (&value2 * &value1).ok_or_else(|| {
+                    self.error(
+                        "Arithmetic".to_string(),
+                        format!("Cannot multiply {value2} by {value1}"),
+                    )
+                })?;
                 self.stack.push(result);
             }
             GenericOpCode::Divide => {
                 let value1 = self.pop_stack();
                 let value2 = self.pop_stack();
-                let result = (&value2 / &value1).ok_or(self.error(
-                    "Arithmetic".to_string(),
-                    format!("Cannot add {value2} to {value1}"),
-                ))?;
+                let result = (&value2 / &value1).ok_or_else(|| {
+                    self.error(
+                        "Arithmetic".to_string(),
+                        format!("Cannot add {value2} to {value1}"),
+                    )
+                })?;
                 self.stack.push(result);
             }
             GenericOpCode::Modulo => {
                 let value1 = self.pop_stack();
                 let value2 = self.pop_stack();
-                let result = (&value2 % &value1).ok_or(self.error(
-                    "Arithmetic".to_string(),
-                    format!("Cannot add {value2} to {value1}"),
-                ))?;
+                let result = (&value2 % &value1).ok_or_else(|| {
+                    self.error(
+                        "Arithmetic".to_string(),
+                        format!("Cannot add {value2} to {value1}"),
+                    )
+                })?;
                 self.stack.push(result);
             }
             GenericOpCode::Negate => {
                 let value = self.pop_stack();
-                let result = (-&value).ok_or(
-                    self.error("Arithmetic".to_string(), format!("Cannot negate {value}")),
-                )?;
+                let result = (-&value).ok_or_else(|| {
+                    self.error("Arithmetic".to_string(), format!("Cannot negate {value}"))
+                })?;
                 self.stack.push(result);
             }
             GenericOpCode::GetVar => {
                 let byte = self.read_byte();
                 self.stack
-                    .push(self.current_callframe().variables[usize::from(byte)].to_owned());
+                    .push(self.current_callframe().variables[usize::from(byte)].clone());
             }
             GenericOpCode::GetVarWide => {
                 let bytes = self.read_bytes();
                 self.stack
-                    .push(self.current_callframe().variables[usize::from(bytes)].to_owned());
+                    .push(self.current_callframe().variables[usize::from(bytes)].clone());
             }
             GenericOpCode::Pop => {
                 self.pop_stack();
             }
+        }
+
+        Ok(())
+    }
+
+    fn call(&mut self) -> Result<()> {
+        let args_start = self.current_list_start();
+        let callee = self.pop_stack();
+        match callee {
+            Value::Function(function) => {
+                if function.kind == FunctionKind::Eridani {
+                    self.function(function.reference, args_start)?;
+                    #[cfg(all(debug_assertions, feature = "std"))]
+                    println!();
+                } else {
+                    let (native, name) = &mut self.natives[usize::from(function.reference)];
+                    let value = native(&self.stack[args_start..])
+                        .map_err(|error| Error::from_argument_error(error, name.to_owned()))?;
+                    self.stack.truncate(args_start);
+                    self.stack.push(value);
+                }
+            }
+            Value::Method(method) => {
+                #[cfg(all(debug_assertions, feature = "std"))]
+                disassemble_chunk(
+                    &method.parameters().0,
+                    "<lambda expression>",
+                    "parameters",
+                    0,
+                );
+
+                self.frames
+                    .push(CallFrame::new(&method.parameters().0, args_start, vec![]));
+                let num_args = self.stack.len() - args_start;
+                if num_args == method.num_parameters() && self.pattern()? {
+                    let frame = self.pop_frame();
+                    let variables = frame.variables;
+                    self.stack.truncate(args_start);
+
+                    #[cfg(all(debug_assertions, feature = "std"))]
+                    disassemble_chunk(method.chunk(), "<lambda expression>", "body", 0);
+
+                    self.frames
+                        .push(CallFrame::new(method.chunk(), self.stack.len(), variables));
+                    self.expr()?;
+                    self.pop_frame();
+                } else {
+                    self.pop_frame();
+                    return Err(self.error(
+                        "Match".to_string(),
+                        format!(
+                            "Lambda expression does not match the arguments '{}'",
+                            ArgsFormatter(&self.stack[args_start..args_start + num_args])
+                        ),
+                    ));
+                }
+            }
+            _ => return Err(self.error("Type".to_string(), format!("Cannot call '{callee}'"))),
         }
 
         Ok(())
@@ -250,70 +318,7 @@ impl Vm {
                 self.current_callframe_mut().list_starts.push(list_start);
             }
             ExprOpCode::Call => {
-                let args_start = self.current_list_start();
-                let callee = self.pop_stack();
-                match callee {
-                    Value::Function(function) => {
-                        if function.kind == FunctionKind::Eridani {
-                            self.function(function.reference, args_start)?;
-                            #[cfg(all(debug_assertions, feature = "std"))]
-                            println!();
-                        } else {
-                            let (native, name) = &mut self.natives[usize::from(function.reference)];
-                            let value = native(&self.stack[args_start..]).map_err(|error| {
-                                Error::from_argument_error(error, name.to_owned())
-                            })?;
-                            self.stack.truncate(args_start);
-                            self.stack.push(value);
-                        }
-                    }
-                    Value::Method(method) => {
-                        #[cfg(all(debug_assertions, feature = "std"))]
-                        disassemble_chunk(
-                            &method.parameters().0,
-                            "<lambda expression>",
-                            "parameters",
-                            0,
-                        );
-
-                        self.frames.push(CallFrame::new(
-                            &method.parameters().0,
-                            args_start,
-                            vec![],
-                        ));
-                        let num_args = self.stack.len() - args_start;
-                        if num_args == method.num_parameters() && self.pattern()? {
-                            let frame = self.pop_frame();
-                            let variables = frame.variables;
-                            self.stack.truncate(args_start);
-
-                            #[cfg(all(debug_assertions, feature = "std"))]
-                            disassemble_chunk(method.chunk(), "<lambda expression>", "body", 0);
-
-                            self.frames.push(CallFrame::new(
-                                method.chunk(),
-                                self.stack.len(),
-                                variables,
-                            ));
-                            self.expr()?;
-                            self.pop_frame();
-                        } else {
-                            self.pop_frame();
-                            return Err(self.error(
-                                "Match".to_string(),
-                                format!(
-                                    "Lambda expression does not match the arguments '{}'",
-                                    ArgsFormatter(&self.stack[args_start..args_start + num_args])
-                                ),
-                            ));
-                        }
-                    }
-                    _ => {
-                        return Err(
-                            self.error("Type".to_string(), format!("Cannot call '{callee}'"))
-                        )
-                    }
-                }
+                self.call()?;
             }
             ExprOpCode::List => {
                 let list_start = self.current_list_start();
@@ -355,72 +360,85 @@ impl Vm {
         Ok(false)
     }
 
+    fn comparison(&mut self, comparison: impl FnOnce(&Value, &Value) -> bool) {
+        let value1 = self.pop_stack();
+        let value2 = self.pop_stack();
+        if comparison(&value2, &value1) {
+            self.stack.push(Value::Number(1.0));
+        } else {
+            self.stack.push(Value::Number(0.0));
+        }
+    }
+
+    fn split_list(&mut self) -> Option<bool> {
+        let value = self.pop_stack();
+        if let Value::List(mut list) = value {
+            let head = if let Some(head) = list.pop_front() {
+                head
+            } else {
+                return Some(false);
+            };
+            self.stack.push(Value::List(list));
+            self.stack.push(head);
+
+            None
+        } else {
+            Some(false)
+        }
+    }
+
+    fn concat_compare(&mut self) -> Option<bool> {
+        let value = self.pop_stack().into_string();
+        let base = self.stack_top().expect_string();
+        let match_start = self.concatenation_match_start();
+
+        if base[match_start..].starts_with(&value) {
+            self.current_callframe_mut().concatenation_match_start =
+                Some(match_start + value.len());
+
+            None
+        } else {
+            Some(false)
+        }
+    }
+
+    fn concat_compare_value_waiting(&mut self) -> Option<bool> {
+        let value = self.pop_stack().into_string();
+        let base = self.stack_top().expect_string();
+        let match_start = self.concatenation_match_start();
+
+        if let Some(value_start) = base.find(&value) {
+            let var = Value::String(base[match_start..value_start].to_string());
+            let new_match_start = value_start + value.len();
+            let frame = self.current_callframe_mut();
+
+            frame.variables.push(var);
+            frame.concatenation_match_start = Some(new_match_start);
+
+            None
+        } else {
+            Some(false)
+        }
+    }
+
     fn pattern_op_code(&mut self, op_code: PatternOpCode) -> Option<bool> {
         match op_code {
             PatternOpCode::HoistValue => {
                 let byte = self.read_byte();
                 self.stack.push(
-                    self.stack[self.current_callframe().frame_start + usize::from(byte)].to_owned(),
+                    self.stack[self.current_callframe().frame_start + usize::from(byte)].clone(),
                 );
             }
             PatternOpCode::DuplicateValue => {
                 let value = expect_option!(self.stack.last(), "read empty stack");
                 self.stack.push(value.to_owned());
             }
-            PatternOpCode::Equal => {
-                let value1 = self.pop_stack();
-                let value2 = self.pop_stack();
-                if value2 == value1 {
-                    self.stack.push(Value::Number(1.0));
-                } else {
-                    self.stack.push(Value::Number(0.0));
-                }
-            }
-            PatternOpCode::NotEqual => {
-                let value1 = self.pop_stack();
-                let value2 = self.pop_stack();
-                if value2 != value1 {
-                    self.stack.push(Value::Number(1.0));
-                } else {
-                    self.stack.push(Value::Number(0.0));
-                }
-            }
-            PatternOpCode::Greater => {
-                let value1 = self.pop_stack();
-                let value2 = self.pop_stack();
-                if value2 > value1 {
-                    self.stack.push(Value::Number(1.0));
-                } else {
-                    self.stack.push(Value::Number(0.0));
-                }
-            }
-            PatternOpCode::GreaterEqual => {
-                let value1 = self.pop_stack();
-                let value2 = self.pop_stack();
-                if value2 >= value1 {
-                    self.stack.push(Value::Number(1.0));
-                } else {
-                    self.stack.push(Value::Number(0.0));
-                }
-            }
-            PatternOpCode::Less => {
-                let value1 = self.pop_stack();
-                let value2 = self.pop_stack();
-                if value2 < value1 {
-                    self.stack.push(Value::Number(1.0));
-                } else {
-                    self.stack.push(Value::Number(0.0));
-                }
-            }
-            PatternOpCode::LessEqual => {
-                let value1 = self.pop_stack();
-                let value2 = self.pop_stack();
-                if value2 <= value1 {
-                    self.stack.push(Value::Number(1.0));
-                } else {
-                    self.stack.push(Value::Number(0.0));
-                }
-            }
+            PatternOpCode::Equal => self.comparison(Value::eq),
+            PatternOpCode::NotEqual => self.comparison(Value::ne),
+            PatternOpCode::Greater => self.comparison(Value::gt),
+            PatternOpCode::GreaterEqual => self.comparison(Value::ge),
+            PatternOpCode::Less => self.comparison(Value::lt),
+            PatternOpCode::LessEqual => self.comparison(Value::le),
             PatternOpCode::Type => {
                 let kind = Type::from(self.read_byte());
                 let value = self.pop_stack();
@@ -431,17 +449,8 @@ impl Vm {
                 }
             }
             PatternOpCode::SplitList => {
-                let value = self.pop_stack();
-                if let Value::List(mut list) = value {
-                    let head = if let Some(head) = list.pop_front() {
-                        head
-                    } else {
-                        return Some(false);
-                    };
-                    self.stack.push(Value::List(list));
-                    self.stack.push(head);
-                } else {
-                    return Some(false);
+                if let Some(value) = self.split_list() {
+                    return Some(value);
                 }
             }
             PatternOpCode::PushVar => {
@@ -452,28 +461,13 @@ impl Vm {
                 self.current_callframe_mut().concatenation_match_start = Some(0);
             }
             PatternOpCode::ConcatCompare => {
-                let value = self.pop_stack().into_string();
-                let base = self.stack_top().expect_string();
-                let match_start = self.concatenation_match_start();
-                if base[match_start..].starts_with(&value) {
-                    self.current_callframe_mut().concatenation_match_start =
-                        Some(match_start + value.len());
-                } else {
-                    return Some(false);
+                if let Some(value) = self.concat_compare() {
+                    return Some(value);
                 }
             }
             PatternOpCode::ConcatCompareVarWaiting => {
-                let value = self.pop_stack().into_string();
-                let base = self.stack_top().expect_string();
-                let match_start = self.concatenation_match_start();
-                if let Some(value_start) = base.find(&value) {
-                    let var = Value::String(base[match_start..value_start].to_string());
-                    let new_match_start = value_start + value.len();
-                    let frame = self.current_callframe_mut();
-                    frame.variables.push(var);
-                    frame.concatenation_match_start = Some(new_match_start);
-                } else {
-                    return Some(false);
+                if let Some(value) = self.concat_compare_value_waiting() {
+                    return Some(value);
                 }
             }
             PatternOpCode::EndConcat => {
@@ -517,9 +511,8 @@ impl Vm {
                 let value = self.pop_stack();
                 if value == Value::Number(1.0) {
                     return Some(true);
-                } else {
-                    return Some(false);
                 }
+                return Some(false);
             }
             PatternOpCode::PatternSuccess => return Some(true),
         }
@@ -556,6 +549,12 @@ impl Vm {
     }
 
     fn function(&mut self, index: u16, args_start: usize) -> Result<()> {
+        let function = &mut self.functions[index as usize];
+        if let Some(value) = function.memo().get(&self.stack[args_start..]) {
+            self.stack.push(value.clone());
+            return Ok(());
+        }
+
         let mut method_index = None;
         let mut i = 0;
         let num_methods = self.functions[index as usize].methods().len();

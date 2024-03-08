@@ -20,7 +20,7 @@ impl ArgumentError {
         }
     }
 
-    pub fn description(&self) -> &String {
+    pub fn description(&self) -> &str {
         &self.description
     }
 }
@@ -73,7 +73,6 @@ impl PartialEq for VersionData {
     }
 }
 
-#[cfg(debug_assertions)]
 macro_rules! internal_error {
     () => {
         panic!("internal compiler error")
@@ -85,13 +84,6 @@ macro_rules! internal_error {
 
     ( $str:expr, $( $arg:expr ),+ ) => {
         panic!(concat!("internal compiler error: ", $str), $( $arg ),+)
-    };
-}
-
-#[cfg(not(debug_assertions))]
-macro_rules! internal_error {
-    ( $( $tokens:expr ),* ) => {
-        unsafe { ::core::hint::unreachable_unchecked() }
     };
 }
 

@@ -69,7 +69,7 @@ pub trait OptionalKind {
     fn optional_kind(&self) -> Option<TokenType>;
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Token {
     kind: TokenType,
     lexeme: String,
@@ -85,20 +85,20 @@ impl Token {
         }
     }
 
-    pub fn kind(&self) -> TokenType {
+    pub const fn kind(&self) -> TokenType {
         self.kind
     }
 
-    pub fn lexeme(&self) -> &String {
+    pub fn lexeme(&self) -> &str {
         &self.lexeme
     }
 
-    pub fn line(&self) -> usize {
+    pub const fn line(&self) -> usize {
         self.line
     }
 }
 
-fn is_alpha(c: char) -> bool {
+const fn is_alpha(c: char) -> bool {
     c.is_ascii_alphabetic() || c == '_'
 }
 
@@ -122,7 +122,7 @@ struct Scanner {
 }
 
 impl Scanner {
-    fn new(source: String) -> Self {
+    const fn new(source: String) -> Self {
         Scanner {
             source,
             start: 0,

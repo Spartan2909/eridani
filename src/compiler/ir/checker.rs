@@ -39,7 +39,9 @@ pub(super) fn verify_pattern(pattern: &Pattern, line: usize, resolved_names: &[u
 
             for item in items {
                 if let Item::Wildcard(var) = item {
-                    if !resolved_names.contains(&var.reference()) {
+                    if resolved_names.contains(&var.reference()) {
+                        wildcard = false;
+                    } else {
                         if wildcard {
                             return Err(Error::new(
                                 line,
@@ -47,11 +49,8 @@ pub(super) fn verify_pattern(pattern: &Pattern, line: usize, resolved_names: &[u
                                 "",
                                 "Sequential wildcards in concatenations are not allowed",
                             ));
-                        } else {
-                            wildcard = true;
                         }
-                    } else {
-                        wildcard = false;
+                        wildcard = true;
                     }
                 } else {
                     wildcard = false;
@@ -82,7 +81,7 @@ pub(super) fn verify_pattern(pattern: &Pattern, line: usize, resolved_names: &[u
         } => {
             let lower = lower.expect_number();
             let upper = upper.expect_number();
-            if lower > upper || !inclusive && lower == upper {
+            if lower > upper || !inclusive && (lower - upper).abs() < f64::EPSILON {
                 return Err(Error::new(line, "Pattern", "", "Range will never match"));
             }
         }
@@ -115,8 +114,6 @@ fn check_for_list_item(expr: &Expr) -> Result<()> {
                     "",
                     "Cannot use '..' in this context",
                 ));
-            } else {
-                unreachable!();
             }
         }
         _ => {}

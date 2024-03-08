@@ -45,6 +45,95 @@ impl<'arena> fmt::Debug for Functions<'arena> {
     }
 }
 
+fn compile_concatenation_pattern(concatenation: &[pattern::Item], line: usize, chunk: &mut Chunk) {
+    chunk.push_instruction(PatternOpCode::StartConcat, line);
+    let mut var_waiting = false;
+    for item in concatenation {
+        match item {
+            pattern::Item::Value(value) => {
+                chunk.push_constant_instruction(value.to_owned(), line);
+                if var_waiting {
+                    chunk.push_instruction(PatternOpCode::ConcatCompareVarWaiting, line);
+                } else {
+                    chunk.push_instruction(PatternOpCode::ConcatCompare, line);
+                }
+            }
+            pattern::Item::Wildcard(variable) => {
+                if variable.pre_set() {
+                    chunk.push_variable_width_instruction(
+                        GenericOpCode::GetVar,
+                        variable.reference(),
+                        line,
+                    );
+                    if var_waiting {
+                        chunk.push_instruction(PatternOpCode::ConcatCompareVarWaiting, line);
+                    } else {
+                        chunk.push_instruction(PatternOpCode::ConcatCompare, line);
+                    }
+                } else {
+                    var_waiting = true;
+                }
+            }
+        }
+    }
+    if var_waiting {
+        chunk.push_instruction(PatternOpCode::EndConcatWithVar, line);
+    } else {
+        chunk.push_instruction(PatternOpCode::EndConcat, line);
+    }
+}
+
+fn compile_operator_comparison_pattern(
+    operator_chain: Option<&pattern::OperatorChain>,
+    comparison: pattern::Comparision,
+    rhs: &pattern::Item,
+    line: usize,
+    chunk: &mut Chunk,
+) {
+    let mut chain = operator_chain.map(|chain| Box::new(chain.clone()));
+    while let Some(operator_chain) = chain {
+        match operator_chain.rhs {
+            pattern::Item::Value(value) => chunk.push_constant_instruction(value, line),
+            pattern::Item::Wildcard(variable) => chunk.push_variable_width_instruction(
+                GenericOpCode::GetVar,
+                variable.reference(),
+                line,
+            ),
+        }
+        let operator = match operator_chain.operator {
+            pattern::ArithOp::Add => GenericOpCode::Add,
+            pattern::ArithOp::Sub => GenericOpCode::Subtract,
+            pattern::ArithOp::Mul => GenericOpCode::Multiply,
+            pattern::ArithOp::Div => GenericOpCode::Divide,
+            pattern::ArithOp::Mod => GenericOpCode::Modulo,
+        };
+        chunk.push_instruction(operator, line);
+        chain = operator_chain.next;
+    }
+    match rhs {
+        pattern::Item::Value(value) => {
+            chunk.push_constant_instruction(value.to_owned(), line);
+        }
+        pattern::Item::Wildcard(variable) => {
+            debug_assert!(variable.pre_set());
+            chunk.push_variable_width_instruction(
+                GenericOpCode::GetVar,
+                variable.reference(),
+                line,
+            );
+        }
+    }
+    let operator = match comparison {
+        pattern::Comparision::Equal => PatternOpCode::Equal,
+        pattern::Comparision::NotEqual => PatternOpCode::NotEqual,
+        pattern::Comparision::Greater => PatternOpCode::Greater,
+        pattern::Comparision::GreaterEqual => PatternOpCode::GreaterEqual,
+        pattern::Comparision::Less => PatternOpCode::Less,
+        pattern::Comparision::LessEqual => PatternOpCode::LessEqual,
+    };
+    chunk.push_instruction(operator, line);
+}
+
 fn compile_pattern(
     pattern: &pattern::Pattern,
     line: usize,
@@ -67,42 +156,7 @@ fn compile_pattern(
             compile_pattern(right, line, chunk, jumps);
         }
         pattern::Pattern::Concatenation(concatenation) => {
-            chunk.push_instruction(PatternOpCode::StartConcat, line);
-            let mut var_waiting = false;
-            for item in concatenation {
-                match item {
-                    pattern::Item::Value(value) => {
-                        chunk.push_constant_instruction(value.to_owned(), line);
-                        if var_waiting {
-                            chunk.push_instruction(PatternOpCode::ConcatCompareVarWaiting, line);
-                        } else {
-                            chunk.push_instruction(PatternOpCode::ConcatCompare, line);
-                        }
-                    }
-                    pattern::Item::Wildcard(variable) => {
-                        if variable.pre_set() {
-                            chunk.push_variable_width_instruction(
-                                GenericOpCode::GetVar,
-                                variable.reference(),
-                                line,
-                            );
-                            if var_waiting {
-                                chunk
-                                    .push_instruction(PatternOpCode::ConcatCompareVarWaiting, line);
-                            } else {
-                                chunk.push_instruction(PatternOpCode::ConcatCompare, line);
-                            }
-                        } else {
-                            var_waiting = true;
-                        }
-                    }
-                }
-            }
-            if var_waiting {
-                chunk.push_instruction(PatternOpCode::EndConcatWithVar, line);
-            } else {
-                chunk.push_instruction(PatternOpCode::EndConcat, line);
-            }
+            compile_concatenation_pattern(concatenation, line, chunk);
         }
         pattern::Pattern::List { left, right } => {
             chunk.push_instruction(PatternOpCode::SplitList, line);
@@ -119,48 +173,13 @@ fn compile_pattern(
             comparison,
             rhs,
         } => {
-            let mut chain = operator_chain.as_ref().map(|chain| Box::new(chain.clone()));
-            while let Some(operator_chain) = chain {
-                match operator_chain.rhs {
-                    pattern::Item::Value(value) => chunk.push_constant_instruction(value, line),
-                    pattern::Item::Wildcard(variable) => chunk.push_variable_width_instruction(
-                        GenericOpCode::GetVar,
-                        variable.reference(),
-                        line,
-                    ),
-                }
-                let operator = match operator_chain.operator {
-                    pattern::ArithOp::Add => GenericOpCode::Add,
-                    pattern::ArithOp::Sub => GenericOpCode::Subtract,
-                    pattern::ArithOp::Mul => GenericOpCode::Multiply,
-                    pattern::ArithOp::Div => GenericOpCode::Divide,
-                    pattern::ArithOp::Mod => GenericOpCode::Modulo,
-                };
-                chunk.push_instruction(operator, line);
-                chain = operator_chain.next;
-            }
-            match rhs {
-                pattern::Item::Value(value) => {
-                    chunk.push_constant_instruction(value.to_owned(), line);
-                }
-                pattern::Item::Wildcard(variable) => {
-                    debug_assert!(variable.pre_set());
-                    chunk.push_variable_width_instruction(
-                        GenericOpCode::GetVar,
-                        variable.reference(),
-                        line,
-                    );
-                }
-            }
-            let operator = match comparison {
-                pattern::Comparision::Equal => PatternOpCode::Equal,
-                pattern::Comparision::NotEqual => PatternOpCode::NotEqual,
-                pattern::Comparision::Greater => PatternOpCode::Greater,
-                pattern::Comparision::GreaterEqual => PatternOpCode::GreaterEqual,
-                pattern::Comparision::Less => PatternOpCode::Less,
-                pattern::Comparision::LessEqual => PatternOpCode::LessEqual,
-            };
-            chunk.push_instruction(operator, line);
+            compile_operator_comparison_pattern(
+                operator_chain.as_ref(),
+                *comparison,
+                rhs,
+                line,
+                chunk,
+            );
         }
         pattern::Pattern::Range {
             lower,

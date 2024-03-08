@@ -16,15 +16,15 @@ pub(super) struct ParseTree {
 }
 
 impl ParseTree {
-    pub(super) fn modules(&self) -> &Vec<(Option<Token>, Token)> {
+    pub(super) fn modules(&self) -> &[(Option<Token>, Token)] {
         &self.modules
     }
 
-    pub(super) fn imports(&self) -> &Vec<ImportTree> {
+    pub(super) fn imports(&self) -> &[ImportTree] {
         &self.imports
     }
 
-    pub(super) fn functions(&self) -> &Vec<Function> {
+    pub(super) fn functions(&self) -> &[Function] {
         &self.functions
     }
 }
@@ -36,11 +36,11 @@ pub(super) struct Function {
 }
 
 impl Function {
-    pub fn name(&self) -> &Token {
+    pub const fn name(&self) -> &Token {
         &self.name
     }
 
-    pub fn methods(&self) -> &Vec<Method> {
+    pub fn methods(&self) -> &[Method] {
         &self.methods
     }
 }
@@ -52,11 +52,11 @@ pub(super) struct Method {
 }
 
 impl Method {
-    pub fn args(&self) -> &Vec<NamedPattern> {
+    pub fn args(&self) -> &[NamedPattern] {
         &self.args
     }
 
-    pub fn body(&self) -> &Expr {
+    pub const fn body(&self) -> &Expr {
         &self.body
     }
 }
@@ -68,11 +68,11 @@ pub(super) struct NamedPattern {
 }
 
 impl NamedPattern {
-    pub fn name(&self) -> Option<&String> {
-        self.name.as_ref().map(|name| name.lexeme())
+    pub fn name(&self) -> Option<&str> {
+        self.name.as_ref().map(Token::lexeme)
     }
 
-    pub fn pattern(&self) -> &Pattern {
+    pub const fn pattern(&self) -> &Pattern {
         &self.pattern
     }
 
@@ -101,11 +101,11 @@ impl OperatorChain {
         }
     }
 
-    pub(crate) fn operator(&self) -> &Token {
+    pub(crate) const fn operator(&self) -> &Token {
         &self.operator
     }
 
-    pub(crate) fn mid(&self) -> &Token {
+    pub(crate) const fn mid(&self) -> &Token {
         &self.mid
     }
 
@@ -114,11 +114,9 @@ impl OperatorChain {
     }
 
     fn line(&self) -> usize {
-        if let Some(next) = &self.next {
-            next.line()
-        } else {
-            self.mid.line()
-        }
+        self.next
+            .as_deref()
+            .map_or_else(|| self.mid.line(), OperatorChain::line)
     }
 }
 
@@ -159,15 +157,15 @@ pub(super) enum Pattern {
 impl Pattern {
     pub(super) fn line(&self) -> usize {
         match self {
-            Pattern::Binary { right, .. } => right.line(),
+            Pattern::Binary { right, .. }
+            | Pattern::List { right, .. }
+            | Pattern::Unary { right, .. } => right.line(),
             Pattern::Concatenation { operator_chain, .. } => operator_chain.line(),
-            Pattern::List { right, .. } => right.line(),
-            Pattern::Literal(literal) => literal.line(),
-            Pattern::OperatorComparison { rhs, .. } => rhs.line(),
-            Pattern::Range { upper, .. } => upper.line(),
-            Pattern::Type(kind) => kind.line(),
-            Pattern::Unary { right, .. } => right.line(),
-            Pattern::Wildcard(name) => name.line(),
+            Pattern::Literal(token)
+            | Pattern::OperatorComparison { rhs: token, .. }
+            | Pattern::Range { upper: token, .. }
+            | Pattern::Type(token)
+            | Pattern::Wildcard(token) => token.line(),
         }
     }
 }
@@ -214,19 +212,17 @@ pub(crate) struct ImportTree {
 
 impl ImportTree {
     pub fn line(&self) -> usize {
-        if let Some(next) = &self.next {
-            next.line()
-        } else {
-            self.name.line()
-        }
+        self.next
+            .as_deref()
+            .map_or_else(|| self.name.line(), ImportTree::line)
     }
 
-    pub fn name(&self) -> &Token {
+    pub const fn name(&self) -> &Token {
         &self.name
     }
 
-    pub fn next(&self) -> &Option<Box<ImportTree>> {
-        &self.next
+    pub fn next(&self) -> Option<&ImportTree> {
+        self.next.as_deref()
     }
 
     fn push(&mut self, name: Token) {
@@ -238,11 +234,7 @@ impl ImportTree {
     }
 
     pub(crate) fn last(&self) -> &ImportTree {
-        if let Some(next) = &self.next {
-            next.last()
-        } else {
-            self
-        }
+        self.next.as_deref().map_or(self, ImportTree::last)
     }
 }
 
