@@ -2,6 +2,7 @@
 name = "eri"
 version.workspace = true
 edition = "2021"
+license.workspace = true
 
 [dependencies]
 clap = { version = "4.1", features = ["derive"] }

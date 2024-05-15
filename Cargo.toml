@@ -2,6 +2,9 @@
 name = "eridani"
 version.workspace = true
 edition = "2021"
+license.workspace = true
+description = "Pure functional scripting, anywhere"
+documentation = "https://docs.rs/eridani/latest"
 
 [dependencies]
 bimap = { version = "0.6", default-features = false }
@@ -27,12 +30,13 @@ error_trait = []
 serialise = ["dep:serde"]
 
 [lib]
-crate_type = ["cdylib", "rlib"]
+crate-type = ["cdylib", "rlib"]
 
 [workspace]
 members = ["eri"]
 
 package.version = "0.1.0"
+package.license = "MIT"
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "forbid"
