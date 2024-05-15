@@ -4,9 +4,6 @@
 #[cfg(not(any(feature = "compiler", feature = "runtime")))]
 compile_error!("Either feature 'compiler' or feature 'runtime' must be enabled");
 
-#[cfg(all(feature = "tree_walk", any(feature = "web", feature = "target_web")))]
-compile_error!("The treewalk interpreter cannot be used with web features");
-
 extern crate alloc;
 
 mod prelude {
@@ -34,7 +31,7 @@ mod common;
 #[cfg(feature = "compiler")]
 mod compiler;
 
-#[cfg(all(feature = "compiler", not(feature = "tree_walk")))]
+#[cfg(feature = "compiler")]
 pub use compiler::compile;
 
 #[cfg(feature = "runtime")]

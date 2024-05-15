@@ -13,9 +13,6 @@ use core::{
     str::FromStr,
 };
 
-#[cfg(feature = "tree_walk")]
-use core::cell::RefCell;
-
 use alloc::collections::VecDeque;
 
 #[cfg(feature = "serialise")]
@@ -23,7 +20,6 @@ use serde::{Deserialize, Serialize};
 
 use strum::EnumCount;
 
-#[cfg(not(feature = "tree_walk"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serialise", derive(Serialize, Deserialize))]
 pub(crate) enum FunctionKind {
@@ -31,7 +27,6 @@ pub(crate) enum FunctionKind {
     Native,
 }
 
-#[cfg(not(feature = "tree_walk"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serialise", derive(Serialize, Deserialize))]
 pub struct FunctionRef {
@@ -185,9 +180,6 @@ use impl_binop_traits;
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            #[cfg(feature = "tree_walk")]
-            Value::Function(fun) => write!(f, "<function '{}'>", fun.borrow().name()),
-            #[cfg(not(feature = "tree_walk"))]
             Value::Function(_) => write!(f, "<function>"),
             Value::List(l) => {
                 write!(f, "[")?;

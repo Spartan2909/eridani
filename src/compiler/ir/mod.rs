@@ -632,6 +632,3 @@ pub(super) fn analyse<'arena>(
 
 #[cfg(test)]
 mod tests;
-
-#[cfg(feature = "tree_walk")]
-mod treewalk;

@@ -1,6 +1,4 @@
-#[cfg(not(feature = "tree_walk"))]
 pub(crate) mod bytecode;
-#[cfg(not(feature = "tree_walk"))]
 pub(crate) mod discriminant;
 pub(crate) mod natives;
 pub(crate) mod value;
@@ -27,11 +25,7 @@ impl ArgumentError {
     }
 }
 
-#[cfg(not(feature = "tree_walk"))]
 pub type EridaniFunction = fn(&[Value]) -> Result<Value, ArgumentError>;
-
-#[cfg(feature = "tree_walk")]
-pub(crate) type EridaniFunction = fn(&[Value]) -> Result<Value, ArgumentError>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(dead_code)]
