@@ -18,7 +18,7 @@ jobs:
       fail-fast: false
       matrix:
         toolchain: [stable, nightly]
-        features-1: ['--features="bin" --workspace', '--no-default-features --features="tree_walk"', '']
+        settings-1: ['-p eri', '']
 
     steps:
     - uses: actions/checkout@v3
@@ -27,11 +27,11 @@ jobs:
         rustup toolchain add ${{ matrix.toolchain }} --component clippy
         rustup override set ${{ matrix.toolchain }}
     - name: Build
-      run: cargo build --verbose ${{ matrix.features-1 }}
+      run: cargo build --verbose ${{ matrix.settings-1 }}
     - name: Run tests
-      run: cargo test --verbose ${{ matrix.features-1 }}
+      run: cargo test --verbose ${{ matrix.settings-1 }}
     - name: Run Clippy
-      run: cargo clippy --verbose ${{ matrix.features-1 }}
+      run: cargo clippy --verbose ${{ matrix.settings-1 }}
   miri:
     name: Test with Miri
     runs-on: ubuntu-latest
@@ -44,4 +44,4 @@ jobs:
           rustup override set nightly
           cargo miri setup
       - name: Run Miri
-        run: 'cargo miri test --workspace --features="bin" --verbose'
+        run: 'cargo miri test -p eri --verbose'
