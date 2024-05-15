@@ -114,15 +114,15 @@ impl OptionalKind for Option<&Token> {
     }
 }
 
-struct Scanner {
-    source: String,
+struct Scanner<'a> {
+    source: &'a str,
     start: usize,
     current: usize,
     line: usize,
 }
 
-impl Scanner {
-    const fn new(source: String) -> Self {
+impl<'a> Scanner<'a> {
+    const fn new(source: &'a str) -> Self {
         Scanner {
             source,
             start: 0,
@@ -362,7 +362,7 @@ impl Scanner {
     }
 }
 
-pub fn scan(source: String) -> Result<Vec<Token>> {
+pub fn scan(source: &str) -> Result<Vec<Token>> {
     let mut scanner = Scanner::new(source);
     let mut tokens = vec![];
     let mut err = vec![];

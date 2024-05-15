@@ -284,6 +284,7 @@ impl FromStr for Value {
 }
 
 impl Value {
+    #[must_use]
     pub const fn as_number(&self) -> Option<f64> {
         if let Value::Number(n) = self {
             Some(*n)
@@ -297,10 +298,12 @@ impl Value {
             .unwrap_or_else(|| internal_error!("called 'expect_number' on {:?}", self))
     }
 
+    #[must_use]
     pub const fn is_something(&self) -> bool {
         !matches!(self, Value::Nothing)
     }
 
+    #[must_use]
     pub const fn as_string(&self) -> Option<&String> {
         if let Value::String(s) = self {
             Some(s)
@@ -322,6 +325,7 @@ impl Value {
         }
     }
 
+    #[must_use]
     pub const fn is_string(&self) -> bool {
         matches!(self, Value::String(_))
     }

@@ -7,7 +7,7 @@ use core::error;
 use std::error;
 
 use crate::{
-    common::{bytecode::Program, value::Value, ArgumentError},
+    common::{bytecode::Program, discriminant, value::Value, ArgumentError},
     prelude::*,
 };
 
@@ -127,6 +127,13 @@ impl fmt::Display for ArgsFormatter<'_> {
 /// ## Errors
 /// Returns any errors encountered by the program.
 pub fn run(program: Program, args: Vec<Value>) -> Result<Value> {
+    if !discriminant::compatible_with_runtime(&program) {
+        return Err(Error::new(
+            "Compatability".to_string(),
+            "Not all expected features are enabled in the runtime".to_string(),
+            0,
+        ));
+    }
     let mut vm = vm::Vm::new(program);
     vm.run(args)
 }

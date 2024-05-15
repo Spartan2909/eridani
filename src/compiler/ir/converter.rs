@@ -80,7 +80,7 @@ fn get_std<'arena>(
 
     let mut modules = vec![std_module, natives_module];
 
-    let eridani_std = parser::parse(scanner::scan(eridani_std)?)?;
+    let eridani_std = parser::parse(scanner::scan(&eridani_std)?, eridani_std)?;
     analyse_module(arena, &eridani_std, std_module, &mut modules)?;
 
     let prelude = compiler::eridani_std::PRELUDE;
@@ -121,7 +121,7 @@ pub(super) fn convert<'arena>(
 
     let mut all_functions: Vec<&'arena RefCell<Function>> = vec![];
 
-    for module in &modules {
+    for &module in &modules {
         module.borrow().resolve_placeholders()?;
         for function in module.borrow().functions() {
             if !all_functions
@@ -137,13 +137,11 @@ pub(super) fn convert<'arena>(
     calls.push(entry_point);
     let functions = calls.calls;
 
-    for function in all_functions {
-        if !functions.contains(&function) {
-            function.borrow_mut().destroy();
-        }
-    }
-
-    Ok(Program::new(entry_point, functions))
+    Ok(Program::new(
+        entry_point,
+        functions,
+        parse_tree.source().to_string(),
+    ))
 }
 
 pub(super) fn analyse_module<'arena>(

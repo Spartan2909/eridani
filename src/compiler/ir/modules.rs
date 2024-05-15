@@ -244,7 +244,7 @@ impl<'arena> Module<'arena> {
             match module_file {
                 #[cfg(feature = "std")]
                 ModuleFile::Source(source, path) => {
-                    let submodule_parse_tree = parser::parse(scanner::scan(source)?)?;
+                    let submodule_parse_tree = parser::parse(scanner::scan(&source)?, source)?;
                     let submodule = arena.allocate(RefCell::new(Module::new(
                         name,
                         clone_bindings(&this.borrow().bindings),

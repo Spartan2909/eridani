@@ -5,6 +5,9 @@ use crate::common::{
     EridaniFunction,
 };
 
+use generic_array::typenum::U32;
+use generic_array::GenericArray;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20,6 +23,7 @@ impl SerialiseNatives {
     }
 }
 
+#[allow(clippy::fallible_impl_from)]
 impl From<Vec<(EridaniFunction, String)>> for SerialiseNatives {
     fn from(value: Vec<(EridaniFunction, String)>) -> Self {
         Self::from_natives(value).unwrap()
@@ -35,7 +39,7 @@ impl TryFrom<SerialiseNatives> for Vec<(EridaniFunction, String)> {
             .into_iter()
             .map(|(index, name)| Ok((NATIVES.get(index).ok_or("invalid native")?.1, name)))
             .collect();
-        Ok(natives?)
+        natives
     }
 }
 
@@ -45,6 +49,7 @@ pub(super) struct SerialiseProgram {
     pub(crate) natives: SerialiseNatives,
     pub(crate) entry_point: u16,
     pub(crate) features: TargetFeatures,
+    checksum: GenericArray<u8, U32>,
 }
 
 impl From<Program> for SerialiseProgram {
@@ -54,6 +59,7 @@ impl From<Program> for SerialiseProgram {
             natives: value.natives.into(),
             entry_point: value.entry_point,
             features: value.features,
+            checksum: value.checksum,
         }
     }
 }
@@ -67,6 +73,7 @@ impl TryFrom<SerialiseProgram> for Program {
             natives: value.natives.try_into()?,
             entry_point: value.entry_point,
             features: value.features,
+            checksum: value.checksum,
         })
     }
 }

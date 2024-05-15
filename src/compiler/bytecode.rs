@@ -16,6 +16,8 @@ use core::{cell::RefCell, fmt};
 
 use alloc::collections::BTreeMap;
 
+use sha2::{Digest, Sha256};
+
 struct Functions<'arena> {
     eridani: Vec<Function>,
     native: Vec<(EridaniFunction, String)>,
@@ -428,10 +430,15 @@ pub(super) fn compile(analysed: &ir::Program) -> Program {
         references: _,
     } = functions;
 
+    let mut hasher = Sha256::new();
+    hasher.update(analysed.source());
+    let checksum = hasher.finalize();
+
     Program {
         functions: eridani,
         natives: native,
         entry_point: *entry_point,
         features: TARGET_FEATURES,
+        checksum,
     }
 }

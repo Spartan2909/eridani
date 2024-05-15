@@ -358,4 +358,11 @@ pub struct Program {
     pub(crate) natives: Vec<(EridaniFunction, String)>,
     pub(crate) entry_point: u16,
     pub(crate) features: TargetFeatures,
+    pub(crate) checksum: generic_array::GenericArray<u8, generic_array::typenum::U32>,
+}
+
+impl Program {
+    pub fn checksum(&self) -> &[u8] {
+        &self.checksum
+    }
 }

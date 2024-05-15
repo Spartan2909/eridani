@@ -65,6 +65,7 @@ impl Vm {
             natives,
             entry_point,
             features: _,
+            checksum: _,
         } = program;
         Self {
             stack: Vec::with_capacity(256),

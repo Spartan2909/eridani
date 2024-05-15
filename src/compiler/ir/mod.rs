@@ -28,16 +28,19 @@ use hashbrown::HashMap;
 pub(crate) struct Program<'arena> {
     entry_point: &'arena RefCell<Function<'arena>>,
     functions: Vec<&'arena RefCell<Function<'arena>>>,
+    source: String,
 }
 
 impl<'arena> Program<'arena> {
     fn new(
         entry_point: &'arena RefCell<Function<'arena>>,
         functions: Vec<&'arena RefCell<Function<'arena>>>,
+        source: String,
     ) -> Program<'arena> {
         Program {
             entry_point,
             functions,
+            source,
         }
     }
 
@@ -47,6 +50,10 @@ impl<'arena> Program<'arena> {
 
     pub(super) fn functions(&self) -> &[&'arena RefCell<Function<'arena>>] {
         &self.functions
+    }
+
+    pub(super) fn source(&self) -> &str {
+        &self.source
     }
 }
 
@@ -162,29 +169,11 @@ impl<'arena> Function<'arena> {
         }
     }
 
-    pub(crate) fn native(&self) -> Option<EridaniFunction> {
-        if let Function::Rust { func, .. } = self {
-            Some(*func)
-        } else {
-            None
-        }
-    }
-
     const fn kind(&self) -> FunctionKind {
         match self {
             Function::Eridani { .. } => FunctionKind::Eridani,
             Function::Rust { .. } => FunctionKind::Rust,
         }
-    }
-
-    fn destroy(&mut self) {
-        if let Function::Eridani { methods, .. } = self {
-            *methods = vec![];
-        }
-    }
-
-    const fn is_native(&self) -> bool {
-        matches!(self, Function::Rust { .. })
     }
 }
 
@@ -627,23 +616,6 @@ fn clone_bindings<'arena>(
         .iter()
         .map(|(a, b)| (a.clone(), b.clone()))
         .collect()
-}
-
-#[cfg(test)]
-fn analyse_unoptimised<'arena>(
-    arena: &Arena<'arena>,
-    parse_tree: &ParseTree,
-    source_origin: Option<String>,
-    entry_point: &str,
-) -> Result<Program<'arena>> {
-    let converted = converter::convert(arena, parse_tree, source_origin, entry_point)?;
-    let checked = checker::check_before_optimisation(converted)?;
-    Ok(checked)
-}
-
-#[cfg(test)]
-fn optimise(program: Program) -> Result<Program> {
-    optimiser::optimise(program)
 }
 
 pub(super) fn analyse<'arena>(

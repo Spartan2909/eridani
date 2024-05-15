@@ -1,13 +1,11 @@
+use super::bytecode::Program;
+
 #[cfg(feature = "serialise")]
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "serialise", derive(Serialize, Deserialize))]
 pub struct TargetFeatures(u8);
-
-#[derive(Debug, Clone, Copy)]
-#[cfg_attr(feature = "serialise", derive(Serialize, Deserialize))]
-pub struct RuntimeFeatures(u8);
 
 #[cfg(feature = "target_std")]
 const TARGET_STD: u8 = 0b0000_0001;
@@ -35,11 +33,8 @@ const RUNTIME_WEB: u8 = 0b0000_0010;
 #[cfg(not(feature = "web"))]
 const RUNTIME_WEB: u8 = 0;
 
-pub const RUNTIME_FEATURES: RuntimeFeatures = RuntimeFeatures(RUNTIME_STD | RUNTIME_WEB);
+const RUNTIME_FEATURES: u8 = RUNTIME_STD | RUNTIME_WEB;
 
-pub const fn features_compatible(
-    target_features: TargetFeatures,
-    runtime_features: RuntimeFeatures,
-) -> bool {
-    target_features.0 & runtime_features.0 == target_features.0
+pub const fn compatible_with_runtime(program: &Program) -> bool {
+    program.features.0 & RUNTIME_FEATURES == program.features.0
 }

@@ -45,8 +45,6 @@ impl<'arena> Drop for Arena<'arena> {
     }
 }
 
-trait Droppable {
-    fn drop(self: Box<Self>) {}
-}
+trait Droppable {}
 
 impl<T> Droppable for T {}

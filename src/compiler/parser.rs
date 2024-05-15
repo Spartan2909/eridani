@@ -1,3 +1,5 @@
+use core::mem;
+
 use crate::{
     compiler::{
         scanner::{OptionalKind, Token, TokenType},
@@ -13,6 +15,7 @@ pub(super) struct ParseTree {
     modules: Vec<(Option<Token>, Token)>,
     imports: Vec<ImportTree>,
     functions: Vec<Function>,
+    source: String,
 }
 
 impl ParseTree {
@@ -26,6 +29,10 @@ impl ParseTree {
 
     pub(super) fn functions(&self) -> &[Function] {
         &self.functions
+    }
+
+    pub(super) fn source(&self) -> &str {
+        &self.source
     }
 }
 
@@ -266,11 +273,16 @@ macro_rules! check_next {
 struct Parser {
     tokens: Vec<Token>,
     current: usize,
+    source: String,
 }
 
 impl Parser {
-    fn new(tokens: Vec<Token>) -> Parser {
-        Self { tokens, current: 0 }
+    fn new(tokens: Vec<Token>, source: String) -> Parser {
+        Self {
+            tokens,
+            current: 0,
+            source,
+        }
     }
 
     fn peek(&self, offset: usize) -> Option<&Token> {
@@ -381,6 +393,7 @@ impl Parser {
                 modules,
                 imports,
                 functions,
+                source: mem::take(&mut self.source),
             })
         } else if errors.len() == 1 {
             Err(VecDeque::from(errors).pop_front().unwrap())
@@ -920,6 +933,6 @@ impl Parser {
     }
 }
 
-pub(super) fn parse(tokens: Vec<Token>) -> Result<ParseTree> {
-    Parser::new(tokens).parse()
+pub(super) fn parse(tokens: Vec<Token>, source: String) -> Result<ParseTree> {
+    Parser::new(tokens, source).parse()
 }

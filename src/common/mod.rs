@@ -14,12 +14,14 @@ pub struct ArgumentError {
 }
 
 impl ArgumentError {
+    #[must_use]
     pub fn new(description: &str) -> ArgumentError {
         ArgumentError {
             description: description.to_string(),
         }
     }
 
+    #[must_use]
     pub fn description(&self) -> &str {
         &self.description
     }

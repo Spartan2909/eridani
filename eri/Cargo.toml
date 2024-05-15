@@ -1,0 +1,9 @@
+[package]
+name = "eri"
+version.workspace = true
+edition = "2021"
+
+[dependencies]
+clap = { version = "4.1", features = ["derive"] }
+eridani = { version = "0.1.0", path = "..", features = ["ffi", "serialise"] }
+postcard = { version = "1.0.8", features = ["alloc"] }
