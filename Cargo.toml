@@ -4,13 +4,19 @@ version.workspace = true
 edition = "2021"
 license.workspace = true
 description = "Pure functional scripting, anywhere"
+repository = "https://github.com/Spartan2909/eridani"
 documentation = "https://docs.rs/eridani/latest"
 
 [dependencies]
 bimap = { version = "0.6", default-features = false }
-generic-array = { version = "0.14.7", features = ["serde"] } # Old version required by sha2/digest/block-buffer
+generic-array = { version = "0.14.7", features = [
+    "serde",
+] } # Old version required by sha2/digest/block-buffer
 hashbrown = "0.14.3"
-serde = { version = "1.0", optional = true, default-features = false, features = ["derive", "alloc"] }
+serde = { version = "1.0", optional = true, default-features = false, features = [
+    "derive",
+    "alloc",
+] }
 sha2 = "0.10.8"
 strum = { version = "0.26.1", default-features = false, features = ["derive"] }
 

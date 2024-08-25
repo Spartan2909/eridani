@@ -3,7 +3,7 @@ use core::{fmt, result};
 #[cfg(all(not(feature = "std"), feature = "error_trait"))]
 use core::error;
 
-#[cfg(all(feature = "std", feature = "error_trait"))]
+#[cfg(feature = "std")]
 use std::error;
 
 use crate::{
@@ -99,7 +99,7 @@ impl fmt::Display for Error {
     }
 }
 
-#[cfg(feature = "error_trait")]
+#[cfg(any(feature = "error_trait", feature = "std"))]
 impl error::Error for Error {}
 
 pub type Result<T> = result::Result<T, Error>;

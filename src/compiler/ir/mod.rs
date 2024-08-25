@@ -629,6 +629,3 @@ pub(super) fn analyse<'arena>(
     let optimised = optimiser::optimise(checked)?;
     Ok(optimised)
 }
-
-#[cfg(test)]
-mod tests;

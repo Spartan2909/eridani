@@ -41,7 +41,7 @@ impl From<u8> for GenericOpCode {
     fn from(value: u8) -> Self {
         if value < GenericOpCode::COUNT as u8 {
             // SAFETY: guaranteed by condition
-            unsafe { mem::transmute(value) }
+            unsafe { mem::transmute::<u8, GenericOpCode>(value) }
         } else {
             internal_error!("cannot interpret '0b{:08b}' as generic opcode", value);
         }
@@ -70,7 +70,7 @@ impl From<u8> for ExprOpCode {
     fn from(value: u8) -> Self {
         if (EXPR_OP_CODE_START..PATTERN_OP_CODE_START).contains(&value) {
             // SAFETY: guaranteed by condition
-            unsafe { mem::transmute(value) }
+            unsafe { mem::transmute::<u8, ExprOpCode>(value) }
         } else {
             internal_error!("cannot interpret '0b{:08b}' as expr opcode", value);
         }
@@ -116,7 +116,7 @@ impl From<u8> for PatternOpCode {
             && (value as usize) < PATTERN_OP_CODE_START as usize + PatternOpCode::COUNT
         {
             // SAFETY: guaranteed by condition
-            unsafe { mem::transmute(value) }
+            unsafe { mem::transmute::<u8, PatternOpCode>(value) }
         } else {
             internal_error!("cannot interpret '0b{:08b}' as pattern opcode", value);
         }
