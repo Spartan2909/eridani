@@ -5,6 +5,8 @@ use crate::{
     compiler::scanner::{Token, TokenType},
 };
 
+use alloc::string::ToString;
+
 impl From<&Token> for Value {
     fn from(value: &Token) -> Self {
         match value.kind() {
