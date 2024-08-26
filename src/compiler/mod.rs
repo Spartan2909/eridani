@@ -1,6 +1,5 @@
 use core::{fmt, result};
 
-mod arena;
 mod bytecode;
 mod eridani_std;
 pub(crate) mod ir;
@@ -76,8 +75,7 @@ pub fn compile(
 ) -> Result<Program> {
     let tokens = scanner::scan(&source)?;
     let parse_tree = parser::parse(tokens, source)?;
-    let arena = arena::Arena::new();
-    let analysed = ir::analyse(&arena, &parse_tree, source_origin, entry_point)?;
+    let analysed = ir::analyse(&parse_tree, source_origin, entry_point)?;
     let code = bytecode::compile(&analysed);
     Ok(code)
 }

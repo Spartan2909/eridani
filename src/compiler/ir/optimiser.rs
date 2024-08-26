@@ -9,6 +9,8 @@ use crate::{
 
 use super::match_engine::MatchResult;
 
+use alloc::rc::Rc;
+
 fn fold_constants(body: &mut Expr) -> Result<()> {
     match body {
         Expr::Binary {
@@ -72,19 +74,19 @@ fn identify_methods(body: &mut Expr) -> Result<()> {
                     }
                 })
                 .collect();
-            match &**callee {
+            match callee.as_ref() {
                 Expr::Function { function, .. } if function.borrow().methods().is_some() => {
                     let mut successes = vec![];
                     let mut indeterminable = vec![];
-                    for &method in function.borrow().methods().unwrap() {
+                    for method in function.borrow().methods().unwrap() {
                         let match_result = partial_match(
                             method.borrow().args(),
                             &arguments,
                             method.borrow().arg_order(),
                         );
                         match match_result {
-                            MatchResult::Success(_) => successes.push(method),
-                            MatchResult::Indeterminable => indeterminable.push(method),
+                            MatchResult::Success(_) => successes.push(Rc::clone(method)),
+                            MatchResult::Indeterminable => indeterminable.push(Rc::clone(method)),
                             MatchResult::Fail => {}
                         }
                     }

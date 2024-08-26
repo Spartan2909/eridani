@@ -11,7 +11,6 @@ use modules::Module;
 use crate::{
     common::{internal_error, value::Value, EridaniFunction},
     compiler::{
-        arena::Arena,
         ir::pattern::{Item, LogOp, Pattern, Variable},
         parser::{ImportTree, ParseTree},
         Result,
@@ -25,18 +24,18 @@ use bimap::BiMap;
 
 use hashbrown::HashMap;
 
-pub(crate) struct Program<'arena> {
-    entry_point: &'arena RefCell<Function<'arena>>,
-    functions: Vec<&'arena RefCell<Function<'arena>>>,
+pub(crate) struct Program {
+    entry_point: Rc<RefCell<Function>>,
+    functions: Vec<Rc<RefCell<Function>>>,
     source: String,
 }
 
-impl<'arena> Program<'arena> {
+impl Program {
     fn new(
-        entry_point: &'arena RefCell<Function<'arena>>,
-        functions: Vec<&'arena RefCell<Function<'arena>>>,
+        entry_point: Rc<RefCell<Function>>,
+        functions: Vec<Rc<RefCell<Function>>>,
         source: String,
-    ) -> Program<'arena> {
+    ) -> Program {
         Program {
             entry_point,
             functions,
@@ -44,16 +43,31 @@ impl<'arena> Program<'arena> {
         }
     }
 
-    pub(super) const fn entry_point(&self) -> &'arena RefCell<Function<'arena>> {
-        self.entry_point
+    pub(super) const fn entry_point(&self) -> &Rc<RefCell<Function>> {
+        &self.entry_point
     }
 
-    pub(super) fn functions(&self) -> &[&'arena RefCell<Function<'arena>>] {
+    pub(super) fn functions(&self) -> &[Rc<RefCell<Function>>] {
         &self.functions
     }
 
     pub(super) fn source(&self) -> &str {
         &self.source
+    }
+}
+
+impl Drop for Program {
+    fn drop(&mut self) {
+        *self.entry_point.borrow_mut() = Function::Eridani {
+            name: String::new(),
+            methods: vec![],
+        };
+        for function in &self.functions {
+            *function.borrow_mut() = Function::Eridani {
+                name: String::new(),
+                methods: vec![],
+            };
+        }
     }
 }
 
@@ -64,10 +78,10 @@ enum FunctionKind {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum Function<'arena> {
+pub(crate) enum Function {
     Eridani {
         name: String,
-        methods: Vec<&'arena RefCell<Method<'arena>>>,
+        methods: Vec<Rc<RefCell<Method>>>,
     },
     Rust {
         name: String,
@@ -75,7 +89,7 @@ pub(crate) enum Function<'arena> {
     },
 }
 
-impl<'arena> PartialEq for Function<'arena> {
+impl PartialEq for Function {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (
@@ -104,15 +118,15 @@ impl<'arena> PartialEq for Function<'arena> {
     }
 }
 
-impl<'arena> Eq for Function<'arena> {}
+impl Eq for Function {}
 
-impl<'arena> PartialOrd for Function<'arena> {
+impl PartialOrd for Function {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<'arena> Ord for Function<'arena> {
+impl Ord for Function {
     fn cmp(&self, other: &Self) -> Ordering {
         match (self, other) {
             (
@@ -132,7 +146,7 @@ impl<'arena> Ord for Function<'arena> {
     }
 }
 
-impl<'arena> Function<'arena> {
+impl Function {
     pub(crate) fn name(&self) -> &str {
         match self {
             Function::Eridani { name, .. } | Function::Rust { name, .. } => name,
@@ -149,7 +163,7 @@ impl<'arena> Function<'arena> {
         Ok(())
     }
 
-    pub(super) fn methods(&self) -> Option<&[&'arena RefCell<Method<'arena>>]> {
+    pub(super) fn methods(&self) -> Option<&[Rc<RefCell<Method>>]> {
         if let Function::Eridani { methods, .. } = self {
             Some(methods)
         } else {
@@ -157,7 +171,7 @@ impl<'arena> Function<'arena> {
         }
     }
 
-    fn calls(&self) -> Vec<&'arena RefCell<Function<'arena>>> {
+    fn calls(&self) -> Vec<Rc<RefCell<Function>>> {
         if let Function::Eridani { methods, .. } = self {
             let mut calls = vec![];
             for method in methods {
@@ -178,20 +192,20 @@ impl<'arena> Function<'arena> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Method<'arena> {
+pub(crate) struct Method {
     args: Vec<(Option<(u16, bool)>, Pattern)>,
     arg_order: Vec<usize>,
-    body: Expr<'arena>,
+    body: Expr,
     environment: Rc<RefCell<Environment>>,
     precedence: i32,
 }
 
-impl<'arena> Method<'arena> {
+impl Method {
     pub(super) fn args(&self) -> &[(Option<(u16, bool)>, Pattern)] {
         &self.args
     }
 
-    pub(super) const fn body(&self) -> &Expr<'arena> {
+    pub(super) const fn body(&self) -> &Expr {
         &self.body
     }
 
@@ -315,22 +329,22 @@ impl Environment {
 }
 
 #[derive(Clone, PartialEq)]
-pub(super) struct PlaceHolderModule<'arena>(&'arena RefCell<Module<'arena>>);
+pub(super) struct PlaceHolderModule(Rc<RefCell<Module>>);
 
-impl<'arena> fmt::Debug for PlaceHolderModule<'arena> {
+impl fmt::Debug for PlaceHolderModule {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(&self.0, f)
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(super) struct ListExpr<'arena> {
-    expr: Expr<'arena>,
+pub(super) struct ListExpr {
+    expr: Expr,
     spread: bool,
 }
 
-impl<'arena> ListExpr<'arena> {
-    pub(super) const fn expr(&self) -> &Expr<'arena> {
+impl ListExpr {
+    pub(super) const fn expr(&self) -> &Expr {
         &self.expr
     }
 
@@ -340,7 +354,7 @@ impl<'arena> ListExpr<'arena> {
 }
 
 #[derive(Clone, PartialEq)]
-pub(super) enum Expr<'arena> {
+pub(super) enum Expr {
     Binary {
         left: Box<Self>,
         operator: BinOp,
@@ -353,11 +367,11 @@ pub(super) enum Expr<'arena> {
     },
     Call {
         callee: Box<Self>,
-        arguments: Vec<ListExpr<'arena>>,
+        arguments: Vec<ListExpr>,
         line: usize,
     },
     Function {
-        function: &'arena RefCell<Function<'arena>>,
+        function: Rc<RefCell<Function>>,
         line: usize,
     },
     Grouping(Box<Self>),
@@ -366,16 +380,16 @@ pub(super) enum Expr<'arena> {
         value: Box<Self>,
     },
     List {
-        expressions: Vec<ListExpr<'arena>>,
+        expressions: Vec<ListExpr>,
         line: usize,
     },
-    ListItem(Box<ListExpr<'arena>>),
+    ListItem(Box<ListExpr>),
     Literal {
         value: Value,
         line: usize,
     },
-    Method(Box<Method<'arena>>),
-    PlaceHolder(ImportTree, PlaceHolderModule<'arena>),
+    Method(Box<Method>),
+    PlaceHolder(ImportTree, PlaceHolderModule),
     Unary {
         operator: UnOp,
         right: Box<Self>,
@@ -386,7 +400,7 @@ pub(super) enum Expr<'arena> {
     },
 }
 
-impl<'arena> Expr<'arena> {
+impl Expr {
     fn resolve_placeholders(&mut self) -> Result<()> {
         match self {
             Self::Binary { left, right, .. } => {
@@ -416,7 +430,7 @@ impl<'arena> Expr<'arena> {
             Self::ListItem(item) => item.expr.resolve_placeholders()?,
             Self::Method(method) => method.body.resolve_placeholders()?,
             Self::PlaceHolder(placeholder, containing_module) => {
-                let containing_module = containing_module.0;
+                let containing_module = Rc::clone(&containing_module.0);
                 let function = containing_module
                     .borrow()
                     .find_function(placeholder.name().lexeme())
@@ -428,7 +442,7 @@ impl<'arena> Expr<'arena> {
                                 .get(placeholder.name().lexeme())
                             {
                                 if let Binding::Function(f) = binding {
-                                    *f
+                                    Rc::clone(f)
                                 } else {
                                     internal_error!("placeholder pointing to module")
                                 }
@@ -455,7 +469,7 @@ impl<'arena> Expr<'arena> {
         Ok(())
     }
 
-    fn calls(&self) -> Vec<&'arena RefCell<Function<'arena>>> {
+    fn calls(&self) -> Vec<Rc<RefCell<Function>>> {
         match self {
             Self::Binary { left, right, .. } => {
                 let mut calls = left.calls();
@@ -481,7 +495,7 @@ impl<'arena> Expr<'arena> {
 
                 calls
             }
-            Self::Function { function, .. } => vec![*function],
+            Self::Function { function, .. } => vec![Rc::clone(function)],
             Self::Grouping(expr) => expr.calls(),
             Self::Let { value, .. } => value.calls(),
             Self::List { expressions, .. } => expressions
@@ -516,7 +530,7 @@ impl<'arena> Expr<'arena> {
     }
 }
 
-impl<'arena> fmt::Debug for Expr<'arena> {
+impl fmt::Debug for Expr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Expr::Binary {
@@ -593,13 +607,13 @@ impl<'arena> fmt::Debug for Expr<'arena> {
 }
 
 #[derive(Debug, Clone)]
-enum Binding<'arena> {
-    Function(&'arena RefCell<Function<'arena>>),
-    Module(&'arena RefCell<Module<'arena>>),
-    PlaceHolder(String, &'arena RefCell<Module<'arena>>),
+enum Binding {
+    Function(Rc<RefCell<Function>>),
+    Module(Rc<RefCell<Module>>),
+    PlaceHolder(String, Rc<RefCell<Module>>),
 }
 
-impl<'arena> Binding<'arena> {
+impl Binding {
     fn name(&self) -> String {
         match self {
             Binding::Function(f) => f.borrow().name().to_string(),
@@ -609,22 +623,19 @@ impl<'arena> Binding<'arena> {
     }
 }
 
-fn clone_bindings<'arena>(
-    bindings: &HashMap<String, Binding<'arena>>,
-) -> HashMap<String, Binding<'arena>> {
+fn clone_bindings(bindings: &HashMap<String, Binding>) -> HashMap<String, Binding> {
     bindings
         .iter()
         .map(|(a, b)| (a.clone(), b.clone()))
         .collect()
 }
 
-pub(super) fn analyse<'arena>(
-    arena: &Arena<'arena>,
+pub(super) fn analyse(
     parse_tree: &ParseTree,
     source_origin: Option<String>,
     entry_point: &str,
-) -> Result<Program<'arena>> {
-    let converted = converter::convert(arena, parse_tree, source_origin, entry_point)?;
+) -> Result<Program> {
+    let converted = converter::convert(parse_tree, source_origin, entry_point)?;
     let checked = checker::check_before_optimisation(converted)?;
     let optimised = optimiser::optimise(checked)?;
     Ok(optimised)

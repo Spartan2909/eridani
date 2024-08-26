@@ -2,7 +2,6 @@ use crate::{
     common::{internal_error, natives},
     compiler::{
         self,
-        arena::Arena,
         ir::{
             checker, clone_bindings,
             match_engine::resolve_metapatterns,
@@ -20,34 +19,31 @@ use crate::{
 use core::cell::RefCell;
 
 use alloc::rc::Rc;
+use alloc::rc::Weak;
+
 use hashbrown::HashMap;
 
-struct Calls<'arena> {
-    calls: Vec<&'arena RefCell<Function<'arena>>>,
+struct Calls {
+    calls: Vec<Rc<RefCell<Function>>>,
 }
 
-impl<'arena> Calls<'arena> {
+impl Calls {
     const fn new() -> Self {
         Calls { calls: vec![] }
     }
 
-    fn push(&mut self, function: &'arena RefCell<Function<'arena>>) {
-        if !self.calls.contains(&function) {
-            self.calls.push(function);
+    fn push(&mut self, function: &Rc<RefCell<Function>>) {
+        if !self.calls.contains(function) {
+            self.calls.push(Rc::clone(function));
             for call in function.borrow().calls() {
-                self.push(call);
+                self.push(&call);
             }
         }
     }
 }
 
 #[allow(clippy::type_complexity)]
-fn get_std<'arena>(
-    arena: &Arena<'arena>,
-) -> Result<(
-    Vec<&'arena RefCell<Module<'arena>>>,
-    HashMap<String, Binding<'arena>>,
-)> {
+fn get_std() -> Result<(Vec<Rc<RefCell<Module>>>, HashMap<String, Binding>)> {
     let mut eridani_std = compiler::eridani_std::ERIDANI_STD_BASIC.to_owned();
 
     #[cfg(feature = "target_std")]
@@ -56,41 +52,44 @@ fn get_std<'arena>(
     #[cfg(feature = "target_web")]
     (eridani_std += compiler::eridani_std::ERIDANI_STD_FEATURE_WEB);
 
-    let std_module: &'arena RefCell<Module<'arena>> =
-        &*arena.allocate(RefCell::new(Module::new("std", HashMap::new(), None, None)));
+    let std_module = Rc::new(RefCell::new(Module::new(
+        "std",
+        HashMap::new(),
+        None,
+        Weak::new(),
+    )));
 
-    let natives_module = arena.allocate(RefCell::new(Module::new(
+    let mut natives_module = Module::new(
         "internals",
         HashMap::new(),
         None,
-        Some(std_module),
-    )));
+        Rc::downgrade(&std_module),
+    );
     for (name, func) in natives::NATIVES {
-        natives_module
-            .get_mut()
-            .push_function(arena.allocate(RefCell::new(Function::Rust {
-                name: name.to_string(),
-                func,
-            })));
+        natives_module.push_function(Rc::new(RefCell::new(Function::Rust {
+            name: name.to_string(),
+            func,
+        })));
     }
+    let natives_module = Rc::new(RefCell::new(natives_module));
 
     std_module
         .borrow_mut()
-        .push_submodule(natives_module, Visibility::Private);
+        .push_submodule(Rc::clone(&natives_module), Visibility::Private);
 
-    let mut modules = vec![std_module, natives_module];
+    let mut modules = vec![Rc::clone(&std_module), natives_module];
 
     let eridani_std = parser::parse(scanner::scan(&eridani_std)?, eridani_std)?;
-    analyse_module(arena, &eridani_std, std_module, &mut modules)?;
+    analyse_module(&eridani_std, Rc::clone(&std_module), &mut modules)?;
 
     let prelude = compiler::eridani_std::PRELUDE;
     let mut bindings = HashMap::new();
-    bindings.insert("std".to_string(), Binding::Module(std_module));
-    for &function in std_module.borrow().functions() {
+    bindings.insert("std".to_string(), Binding::Module(Rc::clone(&std_module)));
+    for function in std_module.borrow().functions() {
         if prelude.contains(&function.borrow().name()) {
             bindings.insert(
                 function.borrow().name().to_string(),
-                Binding::Function(function),
+                Binding::Function(Rc::clone(function)),
             );
         }
     }
@@ -98,43 +97,42 @@ fn get_std<'arena>(
     Ok((modules, bindings))
 }
 
-pub(super) fn convert<'arena>(
-    arena: &Arena<'arena>,
+pub(super) fn convert(
     parse_tree: &ParseTree,
     source_origin: Option<String>,
     entry_point: &str,
-) -> Result<Program<'arena>> {
-    let (mut modules, default_bindings) = get_std(arena)?;
-    let root_module = arena.allocate(RefCell::new(Module::new(
+) -> Result<Program> {
+    let (mut modules, default_bindings) = get_std()?;
+    let root_module = Rc::new(RefCell::new(Module::new(
         "",
         clone_bindings(&default_bindings),
         source_origin,
-        None,
+        Weak::new(),
     )));
-    modules.push(root_module);
-    analyse_module(arena, parse_tree, root_module, &mut modules)?;
+    modules.push(Rc::clone(&root_module));
+    analyse_module(parse_tree, Rc::clone(&root_module), &mut modules)?;
 
     let Some(entry_point) = root_module.borrow().find_function(entry_point) else {
         let message = format!("Cannot find entry point '{entry_point}'");
         return Err(Error::new(1, "Name", "", &message));
     };
 
-    let mut all_functions: Vec<&'arena RefCell<Function>> = vec![];
+    let mut all_functions: Vec<Rc<RefCell<Function>>> = vec![];
 
-    for &module in &modules {
+    for module in &modules {
         module.borrow().resolve_placeholders()?;
         for function in module.borrow().functions() {
             if !all_functions
                 .iter()
                 .any(|f| f.as_ptr() as usize == function.as_ptr() as usize)
             {
-                all_functions.push(*function);
+                all_functions.push(Rc::clone(function));
             }
         }
     }
 
     let mut calls = Calls::new();
-    calls.push(entry_point);
+    calls.push(&entry_point);
     let functions = calls.calls;
 
     Ok(Program::new(
@@ -144,11 +142,10 @@ pub(super) fn convert<'arena>(
     ))
 }
 
-pub(super) fn analyse_module<'arena>(
-    arena: &Arena<'arena>,
+pub(super) fn analyse_module(
     parse_tree: &ParseTree,
-    module: &'arena RefCell<Module<'arena>>,
-    modules: &mut Vec<&'arena RefCell<Module<'arena>>>,
+    module: Rc<RefCell<Module>>,
+    modules: &mut Vec<Rc<RefCell<Module>>>,
 ) -> Result<()> {
     module.borrow_mut().init_names(parse_tree);
 
@@ -159,8 +156,7 @@ pub(super) fn analyse_module<'arena>(
             Visibility::Private
         };
         Module::resolve_submodule(
-            arena,
-            module,
+            Rc::clone(&module),
             module_name.lexeme(),
             module_name.line(),
             modules,
@@ -171,7 +167,7 @@ pub(super) fn analyse_module<'arena>(
     for import in parse_tree.imports() {
         let (imported_module, in_module_tree) =
             module.borrow().find_imported_module(import.name())?;
-        modules.push(imported_module);
+        modules.push(Rc::clone(&imported_module));
 
         let binding = resolve_import(import.clone(), imported_module, in_module_tree)?;
 
@@ -183,28 +179,27 @@ pub(super) fn analyse_module<'arena>(
 
         let mut methods = vec![];
         for method in function.methods() {
-            let method = analyse_method(arena, method, None, module, modules)?;
+            let method = analyse_method(method, None, Rc::clone(&module), modules)?;
 
-            methods.push(&*arena.allocate(RefCell::new(method)));
+            methods.push(Rc::new(RefCell::new(method)));
         }
 
         methods.sort_by(|x, y| x.borrow().precedence.cmp(&y.borrow().precedence).reverse());
 
         module
             .borrow_mut()
-            .push_function(arena.allocate(RefCell::new(Function::Eridani { name, methods })));
+            .push_function(Rc::new(RefCell::new(Function::Eridani { name, methods })));
     }
 
     Ok(())
 }
 
-fn analyse_method<'arena>(
-    arena: &Arena<'arena>,
+fn analyse_method(
     method: &parser::Method,
     enclosing: Option<Rc<RefCell<Environment>>>,
-    module: &'arena RefCell<Module<'arena>>,
-    modules: &mut Vec<&'arena RefCell<Module<'arena>>>,
-) -> Result<Method<'arena>> {
+    module: Rc<RefCell<Module>>,
+    modules: &mut Vec<Rc<RefCell<Module>>>,
+) -> Result<Method> {
     let mut environment = enclosing.map_or_else(Environment::new_toplevel, Environment::new);
 
     let mut lines = vec![];
@@ -264,13 +259,7 @@ fn analyse_method<'arena>(
 
     let environment = Rc::new(RefCell::new(environment));
 
-    let body = convert_expr(
-        arena,
-        method.body(),
-        module,
-        Rc::clone(&environment),
-        modules,
-    )?;
+    let body = convert_expr(method.body(), module, Rc::clone(&environment), modules)?;
 
     Ok(Method {
         args,
@@ -281,11 +270,11 @@ fn analyse_method<'arena>(
     })
 }
 
-fn convert_variable<'arena>(
+fn convert_variable(
     var: &parser::ImportTree,
-    module: &'arena RefCell<Module<'arena>>,
+    module: Rc<RefCell<Module>>,
     environment: &Environment,
-) -> Result<Expr<'arena>> {
+) -> Result<Expr> {
     let expr = if var.next().is_some() {
         let (import_module, looking_from_module_tree) =
             module.borrow().find_imported_module(var.name())?;
@@ -324,7 +313,7 @@ fn convert_variable<'arena>(
     } else if let Some(binding) = module.borrow().bindings().get(var.name().lexeme()) {
         if let Binding::Function(function) = binding {
             Expr::Function {
-                function,
+                function: Rc::clone(function),
                 line: var.line(),
             }
         } else {
@@ -345,13 +334,12 @@ fn convert_variable<'arena>(
     Ok(expr)
 }
 
-fn convert_expr<'arena>(
-    arena: &Arena<'arena>,
+fn convert_expr(
     expr: &parser::Expr,
-    module: &'arena RefCell<Module<'arena>>,
+    module: Rc<RefCell<Module>>,
     environment: Rc<RefCell<Environment>>,
-    modules: &mut Vec<&'arena RefCell<Module<'arena>>>,
-) -> Result<Expr<'arena>> {
+    modules: &mut Vec<Rc<RefCell<Module>>>,
+) -> Result<Expr> {
     use parser::Expr as ParseExpr;
 
     let result = match expr {
@@ -369,8 +357,8 @@ fn convert_expr<'arena>(
                 _ => internal_error!("parsed token '{:?}' as operator", operator),
             };
 
-            let left = convert_expr(arena, left, module, Rc::clone(&environment), modules)?;
-            let right = convert_expr(arena, right, module, environment, modules)?;
+            let left = convert_expr(left, Rc::clone(&module), Rc::clone(&environment), modules)?;
+            let right = convert_expr(right, module, environment, modules)?;
 
             Expr::Binary {
                 left: Box::new(left),
@@ -380,7 +368,7 @@ fn convert_expr<'arena>(
         }
         ParseExpr::Block { body, end } => {
             let inner_environment = Rc::new(RefCell::new(Environment::new(environment)));
-            let body = convert_exprs(arena, body, module, &inner_environment, modules)?;
+            let body = convert_exprs(body, &module, &inner_environment, modules)?;
 
             Expr::Block {
                 body,
@@ -393,9 +381,10 @@ fn convert_expr<'arena>(
             paren,
             arguments,
         } => {
-            let callee = convert_expr(arena, callee, module, Rc::clone(&environment), modules)?;
+            let callee =
+                convert_expr(callee, Rc::clone(&module), Rc::clone(&environment), modules)?;
 
-            let arguments = convert_list(arena, arguments, module, &environment, modules)?;
+            let arguments = convert_list(arguments, &module, &environment, modules)?;
 
             Expr::Call {
                 callee: Box::new(callee),
@@ -404,11 +393,11 @@ fn convert_expr<'arena>(
             }
         }
         ParseExpr::Grouping(expr) => {
-            let expr = convert_expr(arena, expr, module, environment, modules)?;
+            let expr = convert_expr(expr, module, environment, modules)?;
             Expr::Grouping(Box::new(expr))
         }
         ParseExpr::Let { pattern, value } => {
-            let value = convert_expr(arena, value, module, Rc::clone(&environment), modules)?;
+            let value = convert_expr(value, module, Rc::clone(&environment), modules)?;
             let mut pattern: Pattern = pattern.into();
             pattern.bind(&mut environment.borrow_mut());
 
@@ -418,7 +407,7 @@ fn convert_expr<'arena>(
             }
         }
         ParseExpr::List { expressions, end } => Expr::List {
-            expressions: convert_list(arena, expressions, module, &environment, modules)?,
+            expressions: convert_list(expressions, &module, &environment, modules)?,
             line: end.line(),
         },
         ParseExpr::Literal(token) => {
@@ -430,12 +419,12 @@ fn convert_expr<'arena>(
             }
         }
         ParseExpr::Method(method) => {
-            let method = analyse_method(arena, method, None, module, modules)?;
+            let method = analyse_method(method, None, module, modules)?;
 
             Expr::Method(Box::new(method))
         }
         ParseExpr::Unary { operator, right } => {
-            let right = convert_expr(arena, right, module, environment, modules)?;
+            let right = convert_expr(right, module, environment, modules)?;
 
             match operator.kind() {
                 TokenType::DotDot => Expr::ListItem(Box::new(ListExpr {
@@ -455,32 +444,30 @@ fn convert_expr<'arena>(
     Ok(result)
 }
 
-fn convert_exprs<'arena>(
-    arena: &Arena<'arena>,
+fn convert_exprs(
     values: &[parser::Expr],
-    module: &'arena RefCell<Module<'arena>>,
+    module: &Rc<RefCell<Module>>,
     environment: &Rc<RefCell<Environment>>,
-    modules: &mut Vec<&'arena RefCell<Module<'arena>>>,
-) -> Result<Vec<Expr<'arena>>> {
+    modules: &mut Vec<Rc<RefCell<Module>>>,
+) -> Result<Vec<Expr>> {
     let mut result = vec![];
     for value in values {
-        let expr = convert_expr(arena, value, module, Rc::clone(environment), modules)?;
+        let expr = convert_expr(value, Rc::clone(module), Rc::clone(environment), modules)?;
 
         result.push(expr);
     }
     Ok(result)
 }
 
-fn convert_list<'arena>(
-    arena: &Arena<'arena>,
+fn convert_list(
     values: &[parser::Expr],
-    module: &'arena RefCell<Module<'arena>>,
+    module: &Rc<RefCell<Module>>,
     environment: &Rc<RefCell<Environment>>,
-    modules: &mut Vec<&'arena RefCell<Module<'arena>>>,
-) -> Result<Vec<ListExpr<'arena>>> {
+    modules: &mut Vec<Rc<RefCell<Module>>>,
+) -> Result<Vec<ListExpr>> {
     let mut result = vec![];
     for value in values {
-        let expr = convert_expr(arena, value, module, Rc::clone(environment), modules)?;
+        let expr = convert_expr(value, Rc::clone(module), Rc::clone(environment), modules)?;
         let expr = if let Expr::ListItem(expression) = expr {
             *expression
         } else {
