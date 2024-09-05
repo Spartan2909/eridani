@@ -1,10 +1,6 @@
 use core::{fmt, result};
 
-#[cfg(all(not(feature = "std"), feature = "error_trait"))]
 use core::error;
-
-#[cfg(feature = "std")]
-use std::error;
 
 use crate::{
     common::{bytecode::Program, discriminant, value::Value, ArgumentError},
@@ -99,7 +95,6 @@ impl fmt::Display for Error {
     }
 }
 
-#[cfg(any(feature = "error_trait", feature = "std"))]
 impl error::Error for Error {}
 
 pub type Result<T> = result::Result<T, Error>;

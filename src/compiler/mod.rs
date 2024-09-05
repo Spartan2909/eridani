@@ -44,11 +44,7 @@ impl From<Vec<Error>> for Error {
     }
 }
 
-#[cfg(all(not(feature = "std"), feature = "error_trait"))]
 impl core::error::Error for Error {}
-
-#[cfg(feature = "std")]
-impl std::error::Error for Error {}
 
 impl Error {
     pub(crate) fn new(line: usize, kind: &'static str, location: &str, message: &str) -> Self {

@@ -3,6 +3,7 @@ name = "eridani"
 version.workspace = true
 edition = "2021"
 license.workspace = true
+rust-version = "1.81.0"
 description = "Pure functional scripting, anywhere"
 repository = "https://github.com/Spartan2909/eridani"
 documentation = "https://docs.rs/eridani/latest"
@@ -32,7 +33,6 @@ target_web = ["compiler"]
 std = []
 target_std = ["compiler"]
 ffi = []
-error_trait = []
 serialise = ["dep:serde"]
 
 [lib]

@@ -1,5 +1,4 @@
 #![cfg_attr(not(feature = "std"), no_std)]
-#![cfg_attr(feature = "error_trait", feature(error_in_core))]
 
 #[cfg(not(any(feature = "compiler", feature = "runtime")))]
 compile_error!("Either feature 'compiler' or feature 'runtime' must be enabled");
