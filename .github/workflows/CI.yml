@@ -17,15 +17,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        toolchain: [stable, nightly]
         settings-1: ['-p eri', '']
 
     steps:
     - uses: actions/checkout@v3
     - name: Setup
       run: |
-        rustup toolchain add ${{ matrix.toolchain }} --component clippy
-        rustup override set ${{ matrix.toolchain }}
+        rustup toolchain add stable --component clippy
+        rustup override set stable
     - name: Build
       run: cargo build --verbose ${{ matrix.settings-1 }}
     - name: Run tests
