@@ -1,0 +1,21 @@
+[package]
+name = "eridani-compiler"
+edition.workspace = true
+version = "0.1.0"
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+bimap = { version = "0.6.3", default-features = false }
+eridani-common.workspace = true
+hashbrown.workspace = true
+strum.workspace = true
+
+[features]
+default = ["std", "target-std"]
+std = ["eridani-common/std"]
+target-std = ["eridani-common/target-std"]
+target-web = ["eridani-common/target-web"]
+
+[lints]
+workspace = true

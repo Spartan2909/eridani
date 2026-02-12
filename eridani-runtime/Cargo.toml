@@ -1,0 +1,19 @@
+[package]
+name = "eridani-runtime"
+edition.workspace = true
+version = "0.1.0"
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+eridani-common.workspace = true
+serde = { workspace = true, optional = true }
+
+[features]
+default = ["std"]
+serde = ["dep:serde", "eridani-common/serde"]
+std = ["eridani-common/std"]
+web = ["eridani-common/web"]
+
+[lints]
+workspace = true

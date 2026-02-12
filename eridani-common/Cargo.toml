@@ -1,0 +1,22 @@
+[package]
+name = "eridani-common"
+edition.workspace = true
+version = "0.1.0"
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+hashbrown.workspace = true
+serde = { workspace = true, optional = true }
+strum.workspace = true
+
+[features]
+default = ["std"]
+serde = ["dep:serde"]
+std = []
+target-std = []
+target-web = []
+web = []
+
+[lints]
+workspace = true

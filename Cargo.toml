@@ -1,48 +1,52 @@
 [package]
 name = "eridani"
-version.workspace = true
-edition = "2021"
+version = "0.1.0"
+edition.workspace = true
 license.workspace = true
-rust-version = "1.81.0"
+rust-version.workspace = true
 description = "Pure functional scripting, anywhere"
 repository = "https://github.com/Spartan2909/eridani"
 documentation = "https://docs.rs/eridani/latest"
 
 [dependencies]
-bimap = { version = "0.6.3", default-features = false }
-generic-array = { version = "0.14.7", features = [
-    "serde",
-] } # Old version required by sha2/digest/block-buffer
-hashbrown = "0.14.3"
-serde = { version = "1.0.209", optional = true, default-features = false, features = [
-    "derive",
-    "alloc",
-] }
-sha2 = "0.10.8"
-strum = { version = "0.26.1", default-features = false, features = ["derive"] }
+eridani-common.workspace = true
+eridani-compiler = { workspace = true, optional = true }
+eridani-runtime = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
 
 [build-dependencies]
 rustc_version = "0.4.1"
 
 [features]
 default = ["compiler", "runtime", "std", "target_std"]
-compiler = []
-runtime = []
+compiler = ["dep:eridani-compiler"]
+runtime = ["dep:eridani-runtime"]
 web = ["runtime"]
 target_web = ["compiler"]
 std = []
 target_std = ["compiler"]
 ffi = []
-serialise = ["dep:serde"]
+serde = ["dep:serde"]
 
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [workspace]
-members = ["eri"]
-
-package.version = "0.1.0"
+members = ["eri", "eridani-common", "eridani-compiler", "eridani-runtime"]
+package.edition = "2024"
 package.license = "MIT"
+package.rust-version = "1.85.0"
+
+[workspace.dependencies]
+eridani-common = { version = "0.1.0", path = "./eridani-common" }
+eridani-compiler = { version = "0.1.0", path = "./eridani-compiler" }
+eridani-runtime = { version = "0.1.0", path = "./eridani-runtime" }
+hashbrown = "0.16.1"
+serde = { version = "1.0.209", default-features = false, features = [
+    "derive",
+    "alloc",
+] }
+strum = { version = "0.27.2", default-features = false, features = ["derive"] }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "forbid"

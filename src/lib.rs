@@ -1,40 +1,18 @@
-#![cfg_attr(not(feature = "std"), no_std)]
-
-#[cfg(not(any(feature = "compiler", feature = "runtime")))]
-compile_error!("Either feature 'compiler' or feature 'runtime' must be enabled");
+#![no_std]
 
 extern crate alloc;
 
-mod prelude {
-    pub use alloc::{
-        borrow::ToOwned,
-        boxed::Box,
-        format,
-        string::{String, ToString},
-        vec,
-        vec::Vec,
-    };
-}
-
 #[cfg(feature = "ffi")]
 pub mod ffi {
-    pub use crate::common::{value::Value, ArgumentError, EridaniFunction, VersionData};
+    pub use eridani_common::{natives::NativeFunction, value::Value, ArgumentError, VersionData};
 
-    use crate::common::{RustChannel, RustVersionData};
+    use eridani_common::{RustChannel, RustVersionData};
 
     include!(concat!(env!("OUT_DIR"), "/eridani_version_data.rs"));
 }
 
-mod common;
-
 #[cfg(feature = "compiler")]
-mod compiler;
-
-#[cfg(feature = "compiler")]
-pub use compiler::compile;
+pub use eridani_compiler as compiler;
 
 #[cfg(feature = "runtime")]
-mod runtime;
-
-#[cfg(feature = "runtime")]
-pub use runtime::run;
+pub use eridani_runtime as runtime;

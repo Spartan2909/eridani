@@ -64,7 +64,7 @@ fn main() -> ExitCode {
 
     let contents = fs::read_to_string(file_path).expect("Should have been able to read the file");
     let start = Instant::now();
-    let program = match eridani::compile(contents, Some(args.file_path), entry_point) {
+    let program = match eridani::compiler::compile(contents, Some(args.file_path), entry_point) {
         Ok(tree) => tree,
         Err(e) => {
             eprintln!("{e}");
@@ -72,7 +72,7 @@ fn main() -> ExitCode {
         }
     };
 
-    match eridani::run(program, program_args) {
+    match eridani::runtime::run(program, program_args) {
         Ok(value) => {
             if value.is_something() {
                 println!("{value}");
