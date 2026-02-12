@@ -7,6 +7,8 @@ rust-version.workspace = true
 description = "Pure functional scripting, anywhere"
 repository = "https://github.com/Spartan2909/eridani"
 documentation = "https://docs.rs/eridani/latest"
+categories = ["compilers", "no-std"]
+keywords = ["functional", "scripting"]
 
 [dependencies]
 eridani-common.workspace = true
