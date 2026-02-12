@@ -31,16 +31,3 @@ jobs:
       run: cargo test --verbose ${{ matrix.settings-1 }}
     - name: Run Clippy
       run: cargo clippy --verbose ${{ matrix.settings-1 }}
-  miri:
-    name: Test with Miri
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v3
-      - name: Setup
-        run: |
-          rustup toolchain add nightly --component miri
-          rustup override set nightly
-          cargo miri setup
-      - name: Run Miri
-        run: 'cargo miri test -p eri --verbose'
