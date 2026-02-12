@@ -1,8 +1,10 @@
 use crate::{ArgsFormatter, Error, Result};
 
-use core::{mem, ptr::NonNull};
+use core::mem;
 
-use alloc::{borrow::ToOwned, collections::VecDeque, format, string::String, vec, vec::Vec};
+use alloc::{
+    borrow::ToOwned, collections::VecDeque, format, string::String, sync::Arc, vec, vec::Vec,
+};
 
 #[cfg(all(feature = "std", debug_assertions))]
 use eridani_common::bytecode::disassembler::{disassemble_chunk, disassemble_instruction};
@@ -16,7 +18,7 @@ use eridani_common::{
 
 #[derive(Debug)]
 struct CallFrame {
-    code: NonNull<Chunk>,
+    code: Arc<Chunk>,
     concatenation_match_start: Option<usize>,
     ip: usize,
     frame_start: usize,
@@ -25,9 +27,9 @@ struct CallFrame {
 }
 
 impl CallFrame {
-    fn new(chunk: &Chunk, frame_start: usize, variables: Vec<Value>) -> CallFrame {
+    fn new(chunk: Arc<Chunk>, frame_start: usize, variables: Vec<Value>) -> CallFrame {
         CallFrame {
-            code: NonNull::from(chunk),
+            code: chunk,
             concatenation_match_start: None,
             ip: 0,
             frame_start,
@@ -99,13 +101,7 @@ impl Vm {
     }
 
     fn current_chunk(&self) -> &Chunk {
-        // SAFETY: `frame.code` is derived from `&Chunk`,
-        // and `Vm.functions` is never mutated
-        unsafe {
-            expect_option!(self.frames.last(), "no callframe")
-                .code
-                .as_ref()
-        }
+        &expect_option!(self.frames.last(), "no callframe").code
     }
 
     fn pop_stack(&mut self) -> Value {
@@ -129,18 +125,14 @@ impl Vm {
 
     fn read_byte(&mut self) -> u8 {
         let frame = self.current_callframe_mut();
-        // SAFETY: `frame.code` is derived from `&Chunk`,
-        // and `Vm.functions` is never mutated
-        let byte = unsafe { frame.code.as_ref() }.code()[frame.ip];
+        let byte = frame.code.code()[frame.ip];
         frame.ip += 1;
         byte
     }
 
     fn read_opcode(&mut self) -> OpCode {
         let frame = self.current_callframe_mut();
-        // SAFETY: `frame.code` is derived from `&Chunk`,
-        // and `Vm.functions` is never mutated
-        let chunk = unsafe { frame.code.as_ref() };
+        let chunk = &frame.code;
         let byte = chunk.code()[frame.ip];
         #[cfg(all(debug_assertions, feature = "std"))]
         disassemble_instruction(chunk, frame.ip);
@@ -150,9 +142,7 @@ impl Vm {
 
     fn read_bytes(&mut self) -> u16 {
         let frame = self.current_callframe_mut();
-        // SAFETY: `frame.code` is derived from `&Chunk`,
-        // and `Vm.functions` is never mutated
-        let chunk = unsafe { frame.code.as_ref() };
+        let chunk = &frame.code;
         let byte1 = chunk.code()[frame.ip];
         let byte2 = chunk.code()[frame.ip + 1];
         frame.ip += 2;
@@ -279,8 +269,11 @@ impl Vm {
                     0,
                 );
 
-                self.frames
-                    .push(CallFrame::new(&method.parameters().0, args_start, vec![]));
+                self.frames.push(CallFrame::new(
+                    Arc::clone(&method.parameters().0),
+                    args_start,
+                    vec![],
+                ));
                 let num_args = self.stack.len() - args_start;
                 if num_args == method.num_parameters() && self.pattern()? {
                     let frame = self.pop_frame();
@@ -290,8 +283,11 @@ impl Vm {
                     #[cfg(all(debug_assertions, feature = "std"))]
                     disassemble_chunk(method.chunk(), "<lambda expression>", "body", 0);
 
-                    self.frames
-                        .push(CallFrame::new(method.chunk(), self.stack.len(), variables));
+                    self.frames.push(CallFrame::new(
+                        Arc::clone(method.chunk()),
+                        self.stack.len(),
+                        variables,
+                    ));
                     self.expr()?;
                     self.pop_frame();
                 } else {
@@ -573,8 +569,11 @@ impl Vm {
                 "parameters",
                 i,
             );
-            self.frames
-                .push(CallFrame::new(&method.parameters().0, args_start, vec![]));
+            self.frames.push(CallFrame::new(
+                Arc::clone(&method.parameters().0),
+                args_start,
+                vec![],
+            ));
             if self.pattern()? {
                 method_index = Some(i);
                 break;
@@ -607,7 +606,7 @@ impl Vm {
         );
 
         self.frames.push(CallFrame::new(
-            self.functions[index as usize].methods()[method_index].chunk(),
+            Arc::clone(self.functions[index as usize].methods()[method_index].chunk()),
             self.stack.len(),
             variables,
         ));

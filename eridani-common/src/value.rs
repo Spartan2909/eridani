@@ -345,12 +345,13 @@ impl Type {
 }
 
 impl From<u8> for Type {
+    #[expect(unsafe_code, reason = "only option")]
     fn from(value: u8) -> Self {
         if value as usize >= Type::COUNT {
             internal_error!("cannot interpret '0b{:08b}' as type", value);
         }
         // SAFETY: guaranteed by condition
-        unsafe { mem::transmute(value) }
+        unsafe { mem::transmute::<u8, Type>(value) }
     }
 }
 

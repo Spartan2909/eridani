@@ -7,7 +7,7 @@ use crate::{discriminant::TargetFeatures, internal_error, natives::NativeFunctio
 
 use core::mem;
 
-use alloc::{string::String, vec, vec::Vec};
+use alloc::{string::String, sync::Arc, vec, vec::Vec};
 
 use hashbrown::HashMap;
 
@@ -32,6 +32,7 @@ pub enum GenericOpCode {
 }
 
 impl From<u8> for GenericOpCode {
+    #[expect(unsafe_code, reason = "only option")]
     fn from(value: u8) -> Self {
         if value < GenericOpCode::COUNT as u8 {
             // SAFETY: guaranteed by condition
@@ -61,6 +62,7 @@ pub enum ExprOpCode {
 }
 
 impl From<u8> for ExprOpCode {
+    #[expect(unsafe_code, reason = "only option")]
     fn from(value: u8) -> Self {
         if (EXPR_OP_CODE_START..PATTERN_OP_CODE_START).contains(&value) {
             // SAFETY: guaranteed by condition
@@ -105,6 +107,7 @@ pub enum PatternOpCode {
 }
 
 impl From<u8> for PatternOpCode {
+    #[expect(unsafe_code, reason = "only option")]
     fn from(value: u8) -> Self {
         if value >= PATTERN_OP_CODE_START
             && (value as usize) < PATTERN_OP_CODE_START as usize + PatternOpCode::COUNT
@@ -291,19 +294,19 @@ impl Default for Chunk {
 
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct Parameters(pub Chunk);
+pub struct Parameters(pub Arc<Chunk>);
 
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Method {
-    chunk: Chunk,
+    chunk: Arc<Chunk>,
     parameters: Parameters,
     num_parameters: usize,
 }
 
 impl Method {
     #[must_use]
-    pub const fn new(chunk: Chunk, parameters: Parameters, num_parameters: usize) -> Method {
+    pub const fn new(chunk: Arc<Chunk>, parameters: Parameters, num_parameters: usize) -> Method {
         Method {
             chunk,
             parameters,
@@ -312,7 +315,7 @@ impl Method {
     }
 
     #[must_use]
-    pub const fn chunk(&self) -> &Chunk {
+    pub const fn chunk(&self) -> &Arc<Chunk> {
         &self.chunk
     }
 

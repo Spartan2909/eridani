@@ -3,7 +3,8 @@ use crate::ir::{self, pattern};
 use core::{cell::RefCell, fmt};
 
 use alloc::{
-    borrow::ToOwned, boxed::Box, collections::BTreeMap, rc::Rc, string::String, vec, vec::Vec,
+    borrow::ToOwned, boxed::Box, collections::BTreeMap, rc::Rc, string::String, sync::Arc, vec,
+    vec::Vec,
 };
 
 use eridani_common::{
@@ -368,7 +369,11 @@ fn compile_method(method: &ir::Method, functions: &Functions) -> Method {
     }
     parameters.push_instruction(PatternOpCode::PatternSuccess, method.body().line());
 
-    Method::new(chunk, Parameters(parameters), method.args().len())
+    Method::new(
+        Arc::new(chunk),
+        Parameters(Arc::new(parameters)),
+        method.args().len(),
+    )
 }
 
 fn compile_function(
